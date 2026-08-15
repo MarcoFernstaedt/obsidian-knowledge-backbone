@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Privacy-bound hybrid citation search for curated Obsidian vaults"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "Marco Fernstaedt"}]
 dependencies = []
 keywords = ["obsidian", "sqlite", "fts5", "qdrant", "ollama", "hermes"]
@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["obsidian_kb", "hermes_plugin"]
-include-package-data = true
+include-package-data = false
 
 [tool.setuptools.package-data]
 hermes_plugin = ["plugin.yaml", "skills/*/SKILL.md"]
