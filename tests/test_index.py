@@ -15,7 +15,7 @@ class FakeOllama:
 class FakeQdrant:
     def __init__(self): self.points = {}; self.deleted = []
     def ensure(self, corpus=None, signature=None, model_digest=None): pass
-    def upsert(self, points): self.points.update({p["id"]: p for p in points})
+    def upsert(self, points, signature): self.points.update({p["id"]: p for p in points})
     def delete(self, ids, corpus=None, signature=None): self.deleted.extend(ids); [self.points.pop(i, None) for i in ids]
     def query(self, vector, limit, corpus_id=None, signature=None): return list(self.points.values())[:limit]
 

@@ -22,12 +22,13 @@ class Response:
 class RemoteTests(unittest.TestCase):
     @patch("obsidian_kb.remote.request.urlopen")
     def test_ollama_and_qdrant_http_contracts_have_minimal_payload(self, urlopen):
-        urlopen.side_effect = [Response({"embeddings": [[1.0, 2.0]]}), Response({}),
+        urlopen.side_effect = [Response({"embeddings": [[1.0, 2.0]]}),
+                               Response({"result":{"config":{"params":{"vectors":{"size":2,"distance":"Cosine"}}}}}),
                                Response({}), Response({"result": {"points": []}})]
         self.assertEqual(OllamaClient("http://ollama", "model").embed(["text"]), [[1.0, 2.0]])
         qdrant = QdrantClient("http://qdrant", "collection", 2)
         qdrant.ensure()
-        qdrant.upsert([{"id": "id", "vector": [1, 2], "payload": {"chunk_id": "id"}}])
+        qdrant.upsert([{"id": "id", "vector": [1, 2], "payload": {"chunk_id": "id"}}], "a" * 64)
         self.assertEqual(qdrant.query([1, 2], 3), [])
         bodies = [json.loads(call.args[0].data) for call in urlopen.call_args_list if call.args[0].data]
         self.assertEqual(bodies[1], {"points": [{"id": "id", "vector": [1, 2], "payload": {"chunk_id": "id"}}]})

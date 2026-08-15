@@ -6,7 +6,7 @@ Security fixes target the current `main` branch and latest tagged release.
 
 ## Data boundary
 
-The vault is read-only. Configure SQLite state outside the vault and restrict its filesystem permissions to the operator account. Qdrant is a derived projection and must not be exposed publicly. Bind Ollama and Qdrant to trusted interfaces and use network controls appropriate to the host.
+The vault is read-only. SQLite and lock paths equal to or beneath the vault are rejected after realpath resolution; configure state outside the vault and restrict its filesystem permissions to the operator account. Qdrant is a compatibility-signature-isolated derived projection and must not be exposed publicly. Bind Ollama and Qdrant to trusted interfaces and use network controls appropriate to the host.
 
 The index suppresses hidden paths, configured exclusions, frontmatter false notes, private keys, known token formats, and high-confidence credential assignments. This is defense in depth, not a replacement for vault curation. Keep credentials in a secret store, not Markdown.
 

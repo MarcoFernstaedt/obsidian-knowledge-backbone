@@ -21,6 +21,8 @@ max_chars = 1200
 overlap_lines = 2
 maximum_note_bytes = 2097152
 fallback_max_files = 5000
+# Status inventories are complete up to this fail-closed ceiling; overflow reports unknown/stale.
+freshness_max_files = 100000
 
 [semantic]
 ollama_url = "http://127.0.0.1:11434"

@@ -15,6 +15,8 @@ PROVIDER_TOKEN = re.compile(
     r"gh[pousr]_[A-Za-z0-9]{30,}|"                         # GitHub
     r"AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|"                  # AWS long-lived/session access IDs
     r"AC[0-9a-f]{32}:[0-9a-f]{32}"                         # Twilio SID:auth token
+    r"|AIza[0-9A-Za-z_-]{35}"                              # Google API key
+    r"|npm_[A-Za-z0-9]{36}"                                # npm granular access token
     r")(?![A-Za-z0-9])", re.I)
 CREDENTIAL_NAME = (
     r"(?:api[_-]?key|secret(?:[_-]?(?:key|token))?|password|passwd|token|auth[_-]?token|"
@@ -30,12 +32,18 @@ PLACEHOLDER = re.compile(
     r"^(?:<[^>]+>|\$\{?[A-Z_][A-Z0-9_]*\}?|\$[A-Z_][A-Z0-9_]*|%[A-Z_][A-Z0-9_]*%|"
     r"your[_ -]?(?:api[_ -]?key|key|token|password|secret)(?:[_ -]here)?|"
     r"example(?:[_-].*)?|sample(?:[_-].*)?|placeholder|redacted|changeme|replace[_ -]?me|"
-    r"x{3,}|\*+|none|null)$", re.I)
+    r"\[redacted\]|x{3,}|\*+|none|null)$", re.I)
+BEARER_JWT = re.compile(r"(?i)\bbearer\s+eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])")
+DATABASE_URL = re.compile(
+    r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis)://[^\s/:@]+:(?P<password>[^\s/@]+)@[^\s]+")
 
 
 def contains_secret(text: str, extra_patterns: Iterable[str] = ()) -> bool:
-    if PRIVATE_KEY.search(text) or PROVIDER_TOKEN.search(text):
+    if PRIVATE_KEY.search(text) or PROVIDER_TOKEN.search(text) or BEARER_JWT.search(text):
         return True
+    for match in DATABASE_URL.finditer(text):
+        if not PLACEHOLDER.fullmatch(match.group("password")):
+            return True
     for match in ASSIGNMENT.finditer(text):
         value = match.group("value").strip().strip("'\"").rstrip(",;")
         if len(value) >= 6 and not PLACEHOLDER.fullmatch(value):

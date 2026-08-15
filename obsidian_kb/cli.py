@@ -11,6 +11,7 @@ from .config import ConfigError, load_settings
 from .indexer import Indexer, IndexLockError
 from .search import search, status_with_freshness
 from .store import CompatibilityError, Store
+from .rendering import sanitize_human
 
 
 def _settings(args):
@@ -22,13 +23,13 @@ def _emit(payload: dict, as_json: bool):
     if as_json: print(json.dumps(payload, indent=2, sort_keys=True))
     elif "results" in payload:
         for item in payload["results"]:
-            heading = " > ".join(item["heading_path"]) or "(note body)"
-            print(f"{item['citation']} | {item['title']} | {heading} | {item['retrieval_type']} | {item['score']:.6f}")
-            print("UNTRUSTED QUOTED SOURCE: " + item["snippet"])
-        for warning in payload.get("warnings", []): print(f"Warning: {warning}", file=sys.stderr)
+            heading = " > ".join(sanitize_human(value) for value in item["heading_path"]) or "(note body)"
+            print(f"{sanitize_human(item['citation'])} | {sanitize_human(item['title'])} | {heading} | {sanitize_human(item['retrieval_type'])} | {item['score']:.6f}")
+            print("UNTRUSTED QUOTED SOURCE: " + sanitize_human(item["snippet"]))
+        for warning in payload.get("warnings", []): print(f"Warning: {sanitize_human(warning)}", file=sys.stderr)
     else:
         for key, value in payload.items():
-            if key != "ok": print(f"{key}: {value}")
+            if key != "ok": print(f"{sanitize_human(key)}: {sanitize_human(value)}")
 
 
 def cmd_index(args):

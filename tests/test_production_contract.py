@@ -27,7 +27,7 @@ class FakeQdrant:
     def ensure(self, corpus=None, signature=None, model_digest=None):
         from obsidian_kb.remote import RemoteError
         if self.fail: raise RemoteError("offline")
-    def upsert(self, points):
+    def upsert(self, points, signature):
         from obsidian_kb.remote import RemoteError
         if self.fail: raise RemoteError("offline")
         self.points.update({p["id"]: p for p in points})

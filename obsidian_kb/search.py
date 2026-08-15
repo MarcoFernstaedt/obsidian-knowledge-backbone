@@ -11,7 +11,7 @@ from .config import Settings, validate_relative_prefix
 from .indexer import content_exclusion_reason, path_exclusion_reason, source_sha
 from .remote import OllamaClient, QdrantClient, RemoteError
 from .store import CompatibilityError, Store
-from .vault_io import TrustedVault
+from .vault_io import TrustedVault, VaultPolicyError
 
 
 def reciprocal_rank_fusion(lexical:list[dict],semantic:list[dict],limit:int,constant:int=60)->list[dict]:
@@ -48,23 +48,28 @@ def _index_info(store:Store)->dict:
                                   "compatibility_signature":status["compatibility_signature"]}
 
 
-def _source_drift(settings:Settings,store:Store)->int:
+def _source_drift(settings:Settings,store:Store)->tuple[int | None, bool]:
     live:dict[str,str]={}
     with TrustedVault(settings.vault) as vault:
-        for path in vault.markdown_paths(settings.fallback_max_files):
+        paths = vault.markdown_paths(settings.freshness_max_files + 1)
+        if len(paths) > settings.freshness_max_files:
+            return None, False
+        for path in paths:
             if path_exclusion_reason(path,settings):continue
             try:raw,_=vault.read(path,settings.maximum_note_bytes);text=raw.decode("utf-8")
-            except (OSError,UnicodeError):continue
+            except (VaultPolicyError,UnicodeError):continue
+            except OSError:return None, False
             if not content_exclusion_reason(text,settings):live[path]=source_sha(raw)
     indexed={row["path"]:row["source_sha256"] for row in store.conn.execute("SELECT path,source_sha256 FROM notes WHERE status='active'")}
-    return len(set(live)^set(indexed))+sum(live[path]!=indexed[path] for path in set(live)&set(indexed))
+    return len(set(live)^set(indexed))+sum(live[path]!=indexed[path] for path in set(live)&set(indexed)), True
 
 
 def status_with_freshness(settings:Settings)->dict:
     store=Store(settings.state,settings=settings,read_only=True)
     try:
-        status=store.status();drift=_source_drift(settings,store)
-        return {**status,"source_drift_count":drift,"stale":bool(status["stale"] or drift)}
+        status=store.status();drift,complete=_source_drift(settings,store)
+        return {**status,"source_drift_count":drift,"source_inventory_complete":complete,
+                "stale":bool(status["stale"] or not complete or drift)}
     finally:store.close()
 
 
@@ -131,12 +136,16 @@ def search(settings:Settings,question:str,*,limit:int=5,offline:bool=False,path_
             lexical=[row for row in store.lexical(question,limit*4,prefix) if _fresh(row,trusted,settings)]
         semantic=[]
         if not offline and settings.ollama_url and settings.qdrant_url:
-            embedder=ollama or OllamaClient(settings.ollama_url,settings.ollama_model,min(settings.timeout,5.0))
+            embedder=ollama or OllamaClient(settings.ollama_url,settings.ollama_model,min(settings.timeout,5.0),settings.response_max_bytes)
             vector_db=qdrant or QdrantClient(settings.qdrant_url,settings.qdrant_collection,settings.vector_size,min(settings.timeout,5.0),settings.response_max_bytes)
             try:
                 vector=embedder.embed([question])[0]
                 if len(vector)!=settings.vector_size:raise RemoteError("query embedding vector size mismatch")
                 points=vector_db.query(vector,limit*4,settings.corpus_id,settings.compatibility_signature())
+                if not isinstance(points,list) or any(not isinstance(point,dict) or
+                        not isinstance(point.get("payload"),dict) or
+                        not isinstance(point["payload"].get("chunk_id"),str) for point in points):
+                    raise RemoteError("Qdrant query rows invalid")
                 identifiers=[str(p.get("payload",{}).get("chunk_id","")) for p in points]
                 allowed=store.active_semantic([x for x in identifiers if x],prefix)
                 with TrustedVault(settings.vault) as trusted:
@@ -144,7 +153,8 @@ def search(settings:Settings,question:str,*,limit:int=5,offline:bool=False,path_
             except (RemoteError,IndexError):reasons.append("semantic retrieval unavailable; lexical-only results returned")
         else:reasons.append("semantic retrieval disabled or not configured; lexical-only results returned")
         rows=reciprocal_rank_fusion(lexical,semantic,limit);results=[_result(row,i) for i,row in enumerate(rows,1)]
-        info=_index_info(store);drift=_source_drift(settings,store);info["source_drift_count"]=drift;info["stale"]=bool(info["stale"] or drift)
+        info=_index_info(store);drift,complete=_source_drift(settings,store);info["source_drift_count"]=drift
+        info["source_inventory_complete"]=complete;info["stale"]=bool(info["stale"] or not complete or drift)
         if info["pending_vectors"]:reasons.append("semantic projection is pending")
         mode="hybrid" if semantic else "lexical"
         return {"ok":True,"schema_version":"1.0","query":question,"mode":mode,"degraded":bool(reasons),

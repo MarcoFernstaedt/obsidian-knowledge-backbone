@@ -30,7 +30,7 @@ class Chunk:
         return value
 
 
-def frontmatter(text: str) -> tuple[dict[str, str], int]:
+def frontmatter(text: str, control_keys: tuple[str, ...] = ()) -> tuple[dict[str, str], int]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, 0
@@ -41,21 +41,51 @@ def frontmatter(text: str) -> tuple[dict[str, str], int]:
             return {"__malformed__": "true"}, 0
         if lines[index].strip() == "---":
             values: dict[str, str] = {}
+            controls = {key.casefold() for key in control_keys} | {"imperator_retrieval"}
+            previous_key: str | None = None
             for line in lines[1:index]:
                 if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                if line[:1].isspace():
+                    if previous_key in controls:
+                        return {"__malformed__": "true"}, 0
+                    if previous_key is None:
+                        return {"__malformed__": "true"}, 0
+                    continue
+                if line.startswith("-") and previous_key and previous_key not in controls and not values.get(previous_key):
+                    # YAML permits an indentationless sequence as a mapping value.
                     continue
                 if ":" not in line:
                     return {"__malformed__": "true"}, 0
                 key, value = line.split(":", 1)
-                if not key.strip() or key.strip().lower() in values:
+                normalized_key = key.strip().casefold()
+                if not normalized_key or normalized_key in values:
                     return {"__malformed__": "true"}, 0
-                values[key.strip().lower()] = value.strip().lower().strip("'\"")
+                previous_key = normalized_key
+                raw_value = value.strip()
+                if normalized_key in controls:
+                    # Retrieval controls are deliberately limited to plain/quoted scalars.
+                    if raw_value.startswith(("'", '"')):
+                        quote = raw_value[0]; closing = raw_value.find(quote, 1)
+                        if closing < 1 or raw_value[closing + 1:].strip()[:1] not in {"", "#"}:
+                            return {"__malformed__": "true"}, 0
+                        raw_value = raw_value[:closing + 1]
+                    else:
+                        raw_value = raw_value.split(" #", 1)[0].rstrip()
+                    if not raw_value or raw_value[:1] in "[{&*!|>" or ":" in raw_value:
+                        return {"__malformed__": "true"}, 0
+                    scalar = raw_value.casefold().strip("'\"")
+                    allowed = ({"exclude", "include"} if normalized_key == "imperator_retrieval" else
+                               {"true", "false", "yes", "no", "on", "off", "1", "0"})
+                    if scalar not in allowed:
+                        return {"__malformed__": "true"}, 0
+                values[normalized_key] = raw_value.casefold().strip("'\"")
             return values, index + 1
     return {"__malformed__": "true"}, 0
 
 
 def is_frontmatter_excluded(text: str, keys: tuple[str, ...]) -> bool:
-    values, _ = frontmatter(text)
+    values, _ = frontmatter(text, keys)
     if values.get("__malformed__") == "true":
         return True
     return (values.get("imperator_retrieval") == "exclude" or
@@ -92,7 +122,8 @@ def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int, overl
 
 
 def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: int = 60,
-                   max_chars: int = 6000, corpus_id: str = "curated-obsidian", overlap_lines: int = 2) -> list[dict]:
+                   max_chars: int = 6000, corpus_id: str = "curated-obsidian", overlap_lines: int = 2,
+                   compatibility_signature: str = "") -> list[dict]:
     lines = text.splitlines()
     _, body_offset = frontmatter(text)
     stack: list[str] = []
@@ -136,7 +167,8 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
                 continue
             start, end = part[0][0], part[-1][0]
             content_digest = hashlib.sha256(" ".join(content.split()).encode()).hexdigest()
-            chunk_id = str(uuid.uuid5(APPLICATION_NAMESPACE, f"{corpus_id}\0{file_path}\0{ordinal}"))
+            chunk_id = str(uuid.uuid5(APPLICATION_NAMESPACE,
+                                      f"{corpus_id}\0{compatibility_signature}\0{file_path}\0{ordinal}"))
             value = Chunk(chunk_id, chunk_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
                           heading_path, start, end, content, content[:320], source_sha256).as_dict()
             value["ordinal"] = ordinal

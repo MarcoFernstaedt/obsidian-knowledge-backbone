@@ -9,6 +9,7 @@ from pathlib import Path
 
 from obsidian_kb.config import load_settings, validate_relative_prefix
 from obsidian_kb.search import search, status_with_freshness
+from obsidian_kb.rendering import sanitize_human
 
 CONFIG_ENV="OBSIDIAN_KB_CONFIG"
 SEARCH_SCHEMA={
@@ -59,7 +60,7 @@ def _notesearch_command(raw_args:str="")->str:
     if not payload.get("ok"):return payload.get("error","Knowledge search failed.")
     if not payload["results"]:return "No current cited passages found."
     return "UNTRUSTED QUOTED NOTE PASSAGES\n\n"+"\n\n".join(
-        f"{item['citation']} | {' > '.join(item['heading_path']) or '(note body)'}\n{item['snippet']}" for item in payload["results"])
+        f"{sanitize_human(item['citation'])} | {' > '.join(sanitize_human(value) for value in item['heading_path']) or '(note body)'}\n{sanitize_human(item['snippet'])}" for item in payload["results"])
 
 
 def register(ctx):

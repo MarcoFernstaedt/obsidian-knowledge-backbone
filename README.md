@@ -36,12 +36,12 @@ Screen-reader equivalent: the read-only vault passes through exclusion and crede
 
 ## Privacy and correctness model
 
-- The vault is opened only for reading. State is written only to the configured SQLite path and optional Qdrant collection.
-- Hidden paths (enabled by default), configured folders and globs, frontmatter false values, private keys, common Slack/GitLab/Stripe/Twilio/OpenAI/AWS token shapes, and non-placeholder shell/JSON/YAML credential assignments are excluded.
-- Every note read uses descriptor-relative `O_NOFOLLOW` traversal from one trusted vault-root descriptor. Systems without the required descriptor APIs fail closed.
+- The vault is opened only for reading. Configuration rejects SQLite and lock paths equal to or beneath the vault after realpath/symlink resolution, including nonexistent descendants. State is written only to the configured outside-vault SQLite path and optional Qdrant projection.
+- Hidden paths (enabled by default), configured folders and globs, frontmatter false values, private keys, common Slack/GitLab/Stripe/Twilio/OpenAI/AWS/Google/npm token shapes, bearer JWTs, credential-bearing database URLs, and non-placeholder shell/JSON/YAML credential assignments are excluded. `[REDACTED]` and the other documented placeholders remain indexable.
+- Every note read uses descriptor-relative `O_NOFOLLOW` traversal from one trusted vault-root descriptor and validates device, inode, size, mtime, and ctime across the read. Systems without the required descriptor APIs fail closed. Unknown read/traversal failures roll back the complete local scan; only deterministic policy exclusions such as path type, symlink, size, UTF-8, frontmatter, and credentials are committed.
 - Excluded-note records contain only path and reason. They contain no source hash, excerpt, or content.
 - One complete vault scan, including FTS changes, commits as one SQLite transaction. A failed scan leaves the previous complete generation visible. Qdrant work starts only after that commit and remains pending for retry on failure.
-- SQLite is authoritative and uses WAL plus durable pending/tombstone ledgers. Qdrant payloads include corpus, index schema 2, model digest, and compatibility signature; every query/list/delete is generation-filtered and a corpus containing missing or mismatched signatures is rejected before publication or reconciliation.
+- SQLite is authoritative and uses WAL plus durable pending/tombstone ledgers. Compatibility binds every chunk parameter and all content-affecting model/index/exclusion settings; drift requires a new local generation instead of reusing unchanged chunks. The configured Qdrant collection remains a logical base name: each compatibility signature maps to a deterministic side-by-side physical collection, and point IDs also bind the signature. Every query/list/delete stays in that physical generation; malformed metadata/rows fail closed or degrade lexically, and scrolling has strict total page/point/byte limits.
 - Every candidate is checked against the current note SHA-256. Changed or missing source suppresses results until reindexing.
 - Remote failures degrade to lexical retrieval. They do not bypass filtering.
 
@@ -53,7 +53,7 @@ python3 -m venv .venv
 cp config.example.toml config.toml
 ```
 
-Edit `config.toml`. Keep the state path outside the vault. For the Hermes plugin and refresh wrapper, the fixed `OBSIDIAN_KB_CONFIG` target must be an absolute, current-user-owned regular non-symlink file with no group/other permission bits (`chmod 600 config.toml`).
+Edit `config.toml`. The state path must be outside the vault; this is enforced before state or lock creation. `chunking.freshness_max_files` bounds the otherwise complete status inventory; exceeding it reports inventory-incomplete and stale rather than current. For the Hermes plugin and refresh wrapper, the fixed `OBSIDIAN_KB_CONFIG` target must be an absolute, current-user-owned regular non-symlink file with no group/other permission bits (`chmod 600 config.toml`).
 
 ## CLI
 
@@ -112,7 +112,7 @@ For source-directory development, Hermes also supports a trusted plugin director
 
 The database is entirely derived state; vault files are never migrated. No vault backup is required to adopt or remove this index.
 
-1. Configure a new SQLite path and the side-by-side `imperator_obsidian_chunks_v2` collection. The TOML configuration schema is integer `1`; the SQLite/Qdrant index schema is integer `2`; public search results independently use string schema `"1.0"`.
+1. Configure a new SQLite path and the logical Qdrant base `imperator_obsidian_chunks_v2`. Runtime derives a side-by-side physical collection from that base and the complete compatibility signature; it never deletes another generation. The TOML configuration schema is integer `1`; the SQLite/Qdrant index schema is integer `2`; public search results independently use string schema `"1.0"`.
 2. Run `index`, then `audit`, then an offline `query` before enabling consumers.
 3. Point the operator config at the verified state path.
 4. Rollback does **not** depend on an automatically created database backup. Disable the new plugin/refresh and restore the unchanged legacy command implementation against the unchanged legacy `imperator_obsidian_notes` collection retained outside this repository.
@@ -134,7 +134,7 @@ Build front doors are exactly pinned to `build==1.5.0` and `setuptools==80.9.0`,
 
 ## Limitations
 
-- The frontmatter reader intentionally supports simple top-level `key: value` booleans, not full YAML.
+- The dependency-free bounded frontmatter reader extracts strict scalar retrieval-control keys while tolerating ordinary nested/list metadata. It is not a general-purpose YAML object loader; malformed retrieval-control fields fail closed.
 - FTS5 must be enabled in the host SQLite build.
 - Secret detection prioritizes high-confidence suppression; operators must still exclude sensitive folders and review configuration.
 - No live Qdrant or Ollama deployment is performed by this repository's tests.

@@ -27,7 +27,7 @@ class FakeOllama:
 class FakeQdrant:
     def __init__(self): self.points = {}; self.deleted = []; self.signatures = []; self.upsert_batches = []
     def ensure(self, corpus, signature, model_digest): self.signatures.append((corpus, signature, model_digest))
-    def upsert(self, points): self.upsert_batches.append(list(points)); self.points.update({p["id"]: p for p in points})
+    def upsert(self, points, signature): self.upsert_batches.append(list(points)); self.points.update({p["id"]: p for p in points})
     def delete(self, ids, corpus=None, signature=None): self.deleted.extend(ids)
     def query(self, vector, limit, corpus, signature): return list(self.points.values())[:limit]
     def list_ids(self, corpus, signature): return list(self.points)
@@ -211,7 +211,7 @@ class QdrantCompatibilityTests(unittest.TestCase):
         with self.assertRaises(RemoteError): OllamaClient("http://o", "m").embed(["x"])
         urlopen.reset_mock()
         urlopen.side_effect = [
-            BoundedResponse(json.dumps({"result":{"config":{"params":{"vectors":{"size":2}}}}}).encode()),
+            BoundedResponse(json.dumps({"result":{"config":{"params":{"vectors":{"size":2,"distance":"Cosine"}}}}}).encode()),
             BoundedResponse(json.dumps({"result":{"points":[{"id":"x","payload":{"corpus_id":"c"}}],"next_page_offset":None}}).encode()),
         ]
         q = QdrantClient("http://q", "collection", 2)

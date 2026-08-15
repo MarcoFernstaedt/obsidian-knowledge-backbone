@@ -12,7 +12,7 @@ from .config import Settings
 from .privacy import contains_secret
 from .remote import OllamaClient, QdrantClient, RemoteError
 from .store import Store
-from .vault_io import TrustedVault
+from .vault_io import TrustedVault, VaultPolicyError
 
 
 class IndexLockError(RuntimeError):
@@ -101,7 +101,7 @@ class Indexer:
                                "model_digest": self.settings.model_digest,
                                "compatibility_signature": self.settings.compatibility_signature()}
                     points.append({"id": row["point_id"], "vector": vector, "payload": payload})
-                self.qdrant.upsert(points)
+                self.qdrant.upsert(points, self.settings.compatibility_signature())
                 for row in batch: self._s().mark_projection(row["chunk_id"], True)
         except RemoteError as exc:
             for row in pending: self._s().mark_projection(row["chunk_id"], False, type(exc).__name__)
@@ -145,7 +145,12 @@ class Indexer:
                     raw, info = trusted.read(path, self.settings.maximum_note_bytes)
                     text = raw.decode("utf-8")
                 except UnicodeError: reason = "unreadable"
-                except OSError as exc: reason = "oversized" if "size limit" in str(exc) else "unsafe-path"
+                except VaultPolicyError as exc:
+                    message = str(exc)
+                    if "size limit" in message:
+                        reason = "oversized"
+                    else:
+                        reason = "unsafe-path"
             if not reason and text is not None: reason = content_exclusion_reason(text, self.settings)
             row = store.note(path) if store else None
             if reason:
@@ -160,7 +165,8 @@ class Indexer:
                 unchanged += 1; continue
             chunks = chunk_markdown(text, digest, path, max_lines=self.settings.max_lines,
                                     max_chars=self.settings.max_chars, overlap_lines=self.settings.overlap_lines,
-                                    corpus_id=self.settings.corpus_id)
+                                    corpus_id=self.settings.corpus_id,
+                                    compatibility_signature=self.settings.compatibility_signature())
             if store and not dry_run:
                 store.replace_note(path, digest, chunks, mtime_ns=info.st_mtime_ns, size_bytes=info.st_size)
             changed += 1

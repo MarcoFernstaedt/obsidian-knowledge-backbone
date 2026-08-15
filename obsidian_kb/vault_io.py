@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import os
+import errno
 from pathlib import Path, PurePosixPath
 import stat
 
 
 _REQUIRED = ("O_DIRECTORY", "O_NOFOLLOW")
+
+
+class VaultPolicyError(OSError):
+    """A deterministic path/type/size policy exclusion, not a transient read failure."""
 
 
 def _supported() -> bool:
@@ -51,7 +56,12 @@ class TrustedVault:
         current = os.dup(self.fd); owned = True
         try:
             for part in parts[:-1]:
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                try:
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                        raise VaultPolicyError("vault path contains a symlink or non-directory") from exc
+                    raise
                 os.close(current); current = child
             return current, owned
         except Exception:
@@ -60,22 +70,28 @@ class TrustedVault:
     def read(self, relative_path: str, maximum_bytes: int) -> tuple[bytes, os.stat_result]:
         parts = _parts(relative_path); parent, _ = self._open_parent(parts)
         try:
-            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                    raise VaultPolicyError("vault entry is a symlink or unsafe path") from exc
+                raise
         finally:
             os.close(parent)
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode): raise OSError("vault entry is not a regular file")
-            if info.st_size > maximum_bytes: raise OSError("vault entry exceeds size limit")
+            if not stat.S_ISREG(info.st_mode): raise VaultPolicyError("vault entry is not a regular file")
+            if info.st_size > maximum_bytes: raise VaultPolicyError("vault entry exceeds size limit")
             chunks: list[bytes] = []; remaining = maximum_bytes + 1
             while remaining:
                 block = os.read(fd, min(131072, remaining))
                 if not block: break
                 chunks.append(block); remaining -= len(block)
             raw = b"".join(chunks)
-            if len(raw) > maximum_bytes: raise OSError("vault entry exceeds size limit")
+            if len(raw) > maximum_bytes: raise VaultPolicyError("vault entry exceeds size limit")
             after = os.fstat(fd)
-            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                 raise OSError("vault entry changed during read")
             return raw, after
         finally:
@@ -98,7 +114,9 @@ class TrustedVault:
                         finally: os.close(child)
                     elif entry.name.endswith(".md") and entry.is_file(follow_symlinks=False):
                         output.append(PurePosixPath(*rel).as_posix())
-                except OSError:
-                    continue
+                except OSError as exc:
+                    if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                        continue
+                    raise
         walk(self.fd, ())
         return output

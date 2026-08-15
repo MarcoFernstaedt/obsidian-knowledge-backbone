@@ -39,6 +39,7 @@ class Settings:
     model_digest: str = "unknown"
     maximum_note_bytes: int = 2_097_152
     fallback_max_files: int = 5_000
+    freshness_max_files: int = 100_000
     include_globs: tuple[str, ...] = ("*.md", "**/*.md")
     embedding_batch_size: int = 8
     response_max_bytes: int = 8 * 1024 * 1024
@@ -46,11 +47,13 @@ class Settings:
     def compatibility(self) -> dict[str, object]:
         policy = json.dumps({"include_globs": self.include_globs, "folders": self.excluded_folders, "globs": self.excluded_globs,
                              "hidden": self.exclude_hidden, "frontmatter": self.frontmatter_false_keys,
-                             "secrets": self.extra_secret_patterns}, sort_keys=True, separators=(",", ":"))
+                             "secrets": self.extra_secret_patterns,
+                             "maximum_note_bytes": self.maximum_note_bytes}, sort_keys=True, separators=(",", ":"))
         return {"schema_version": self.schema_version, "corpus_id": self.corpus_id,
                 "collection": self.qdrant_collection, "embedding_model": self.ollama_model,
                 "model_digest": self.model_digest, "vector_size": self.vector_size,
-                "chunker_version": self.chunker_version,
+                "chunker_version": self.chunker_version, "max_lines": self.max_lines,
+                "max_chars": self.max_chars, "overlap_lines": self.overlap_lines,
                 "policy_fingerprint": hashlib.sha256(policy.encode()).hexdigest()}
 
     def compatibility_signature(self) -> str:
@@ -135,7 +138,7 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     exclusions, chunking, semantic = _table(data,"exclusions"), _table(data,"chunking"), _table(data,"semantic")
     _known(vault_cfg,{"path"},"vault"); _known(state_cfg,{"sqlite_path"},"state")
     _known(exclusions,{"include_globs","folders","globs","hidden","frontmatter_false_keys","secret_patterns"},"exclusions")
-    _known(chunking,{"max_lines","max_chars","overlap_lines","maximum_note_bytes","fallback_max_files"},"chunking")
+    _known(chunking,{"max_lines","max_chars","overlap_lines","maximum_note_bytes","fallback_max_files","freshness_max_files"},"chunking")
     _known(semantic,{"ollama_url","ollama_model","qdrant_url","collection","vector_size","timeout","model_digest","batch_size","response_max_bytes"},"semantic")
     vault_value, state_value = vault or vault_cfg.get("path"), state or state_cfg.get("sqlite_path")
     if not isinstance(vault_value,(str,Path)) or not str(vault_value): raise ConfigError("vault.path or --vault is required")
@@ -143,6 +146,11 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     vault_path, state_path = Path(vault_value).expanduser(), Path(state_value).expanduser()
     if not vault_path.is_absolute(): vault_path = base / vault_path
     if not state_path.is_absolute(): state_path = base / state_path
+    vault_path = vault_path.resolve()
+    state_path = state_path.resolve()
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock").resolve()
+    if state_path == vault_path or state_path.is_relative_to(vault_path) or lock_path == vault_path or lock_path.is_relative_to(vault_path):
+        raise ConfigError("state database and lock must be outside the vault")
     folders = _strings(exclusions.get("folders"),"exclusions.folders") or Settings.excluded_folders
     globs = _strings(exclusions.get("globs"),"exclusions.globs") or Settings.excluded_globs
     includes = _strings(exclusions.get("include_globs"),"exclusions.include_globs") or Settings.include_globs
@@ -157,6 +165,7 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
             "overlap_lines": chunking.get("overlap_lines",2),
             "maximum_note_bytes": chunking.get("maximum_note_bytes",2_097_152),
             "fallback_max_files": chunking.get("fallback_max_files",5_000),
+            "freshness_max_files": chunking.get("freshness_max_files",100_000),
             "vector_size": semantic.get("vector_size",768), "embedding_batch_size": semantic.get("batch_size",8),
             "response_max_bytes": semantic.get("response_max_bytes",8*1024*1024)}
     if any(not isinstance(v,int) or isinstance(v,bool) or v < 1 for k,v in ints.items() if k != "overlap_lines"): raise ConfigError("chunking and vector sizes must be positive integers")
@@ -170,7 +179,7 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     model=semantic.get("ollama_model","nomic-embed-text"); collection=semantic.get("collection","imperator_obsidian_chunks_v2")
     digest=semantic.get("model_digest","unknown")
     if any(not isinstance(x,str) or not x for x in (model,collection,digest)): raise ConfigError("semantic model, collection, and digest must be non-empty strings")
-    return Settings(vault=vault_path.resolve(), state=state_path.resolve(), excluded_folders=folders,
+    return Settings(vault=vault_path, state=state_path, excluded_folders=folders,
                     excluded_globs=globs, exclude_hidden=hidden, frontmatter_false_keys=keys,
                     extra_secret_patterns=patterns, max_lines=ints["max_lines"], max_chars=ints["max_chars"],
                     overlap_lines=ints["overlap_lines"], ollama_url=_url(semantic.get("ollama_url"),"semantic.ollama_url"),
@@ -178,5 +187,6 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
                     qdrant_collection=collection, vector_size=ints["vector_size"], timeout=float(timeout),
                     corpus_id=corpus, schema_version=2, chunker_version="heading-v3", model_digest=digest,
                     maximum_note_bytes=ints["maximum_note_bytes"], fallback_max_files=ints["fallback_max_files"],
+                    freshness_max_files=ints["freshness_max_files"],
                     include_globs=includes, embedding_batch_size=ints["embedding_batch_size"],
                     response_max_bytes=ints["response_max_bytes"])
