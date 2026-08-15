@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 import hashlib
+import json
 import re
 import uuid
 
@@ -29,9 +30,35 @@ class Chunk:
         return value
 
 
+def _mapping_key(raw: str) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+    if value.startswith('"'):
+        try: decoded = json.loads(value)
+        except (json.JSONDecodeError, UnicodeError): return None
+        return decoded if isinstance(decoded, str) and decoded else None
+    if value.startswith("'"):
+        if len(value) < 2 or not value.endswith("'"):
+            return None
+        inner = value[1:-1]
+        index = 0
+        while index < len(inner):
+            if inner[index] == "'":
+                if index + 1 >= len(inner) or inner[index + 1] != "'":
+                    return None
+                index += 2
+            else:
+                index += 1
+        return inner.replace("''", "'") or None
+    if value[:1] in "[{&*!|>" or any(char in value for char in "'\""):
+        return None
+    return value
+
+
 def frontmatter(text: str, control_keys: tuple[str, ...] = ()) -> tuple[dict[str, str], int]:
     lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].removeprefix("\ufeff").strip() != "---":
         return {}, 0
     bounded = 0
     for index in range(1, len(lines)):
@@ -57,7 +84,8 @@ def frontmatter(text: str, control_keys: tuple[str, ...] = ()) -> tuple[dict[str
                 if ":" not in line:
                     return {"__malformed__": "true"}, 0
                 key, value = line.split(":", 1)
-                normalized_key = key.strip().casefold()
+                decoded_key = _mapping_key(key)
+                normalized_key = decoded_key.casefold() if decoded_key else ""
                 if not normalized_key or normalized_key in values:
                     return {"__malformed__": "true"}, 0
                 previous_key = normalized_key

@@ -48,7 +48,7 @@ def cmd_query(args):
 
 
 def _audit(settings):
-    store = Store(settings.state, settings=settings, read_only=True)
+    store = Store(settings.state, settings=settings, read_only=True, immutable=True)
     try: integrity = store.conn.execute("PRAGMA quick_check(1)").fetchone()[0]
     finally: store.close()
     status = status_with_freshness(settings)

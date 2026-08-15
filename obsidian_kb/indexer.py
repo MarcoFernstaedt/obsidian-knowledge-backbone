@@ -11,6 +11,7 @@ from .chunker import chunk_markdown, is_frontmatter_excluded
 from .config import Settings
 from .privacy import contains_secret
 from .store import Store
+from .state_io import TrustedStateDirectory
 from .vault_io import TrustedVault, VaultPolicyError
 
 
@@ -41,27 +42,39 @@ def content_exclusion_reason(text: str, settings: Settings) -> str | None:
 class Indexer:
     def __init__(self, settings: Settings):
         self.settings, self.store, self._lock_handle = settings, None, None
+        self._state_directory: TrustedStateDirectory | None = None
 
     @property
     def lock_path(self) -> Path: return self.settings.state.with_suffix(self.settings.state.suffix + ".lock")
 
     def acquire_lock(self) -> None:
-        if self._lock_handle: return
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        handle = self.lock_path.open("a+"); os.chmod(self.lock_path, 0o600)
+        if self._lock_handle:
+            assert self._state_directory is not None
+            self._state_directory.assert_boundary()
+            return
+        state_directory = TrustedStateDirectory(self.settings.state, self.settings.vault, create=True)
+        fd = state_directory.open_regular(".lock", append=True)
+        handle = os.fdopen(fd, "a+")
         try: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            handle.close(); raise IndexLockError("knowledge index is already running") from exc
-        self._lock_handle = handle
+            handle.close(); state_directory.close()
+            raise IndexLockError("knowledge index is already running") from exc
+        try:
+            state_directory.assert_boundary()
+        except Exception:
+            handle.close(); state_directory.close(); raise
+        self._lock_handle, self._state_directory = handle, state_directory
 
     def release_lock(self) -> None:
         if self._lock_handle:
             fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
             self._lock_handle.close(); self._lock_handle = None
+        if self._state_directory:
+            self._state_directory.close(); self._state_directory = None
 
     def close(self):
-        self.release_lock()
         if self.store: self.store.close(); self.store = None
+        self.release_lock()
 
     def _scan(self, trusted: TrustedVault, dry_run: bool) -> dict[str, int]:
         store = self.store
@@ -102,14 +115,18 @@ class Indexer:
         if not dry_run: self.acquire_lock()
         try:
             if dry_run:
-                if self.settings.state.is_file(): self.store = Store(self.settings.state, settings=self.settings, read_only=True, immutable=True)
+                try: self.store = Store(self.settings.state, settings=self.settings, read_only=True, immutable=True)
+                except FileNotFoundError: self.store = None
                 with TrustedVault(self.settings.vault) as trusted: counts = self._scan(trusted, True)
+                drifted = bool(counts["changed"] or counts["excluded"] or counts["removed"])
                 status = self.store.status() if self.store else {"active_notes": 0, "excluded_notes": 0, "chunks": 0,
-                    "generated_at": None, "age_seconds": None, "stale": bool(counts["changed"] or counts["excluded"] or counts["removed"]),
-                    "current": not bool(counts["changed"] or counts["excluded"] or counts["removed"]), "compatibility": "current"}
+                    "generated_at": None, "age_seconds": None, "compatibility": "current"}
+                status.update({"stale": drifted, "current": not drifted})
                 return {"ok": True, **counts, "warnings": [], "dry_run": True, **status}
-            self.store = Store(self.settings.state, settings=self.settings)
+            assert self._state_directory is not None
+            self._state_directory.assert_boundary()
+            self.store = Store(self.settings.state, settings=self.settings, state_directory=self._state_directory)
             with TrustedVault(self.settings.vault) as trusted, self.store.scan_transaction():
                 counts = self._scan(trusted, False); self.store.complete_scan()
             return {"ok": True, **counts, "warnings": [], "dry_run": False, **self.store.status()}
-        finally: self.release_lock()
+        finally: self.close()

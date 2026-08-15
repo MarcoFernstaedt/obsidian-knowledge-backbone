@@ -6,11 +6,11 @@ Security fixes target the current `main` branch and latest tagged release.
 
 ## Data boundary
 
-The vault is read-only. SQLite and lock paths equal to or beneath it are rejected after realpath resolution. Keep the private config and derived database readable only by the operator account.
+The vault is read-only. State ancestors are opened from the filesystem root with descriptor-relative `O_NOFOLLOW`; symlink/non-directory ancestors are rejected. SQLite, WAL, SHM, and lock operations remain bound to one trusted state-directory descriptor outside the live vault, with device/inode and containment checks repeated at operation boundaries. Linux `/proc/self/fd` support is required and other hosts fail closed. Keep the private config and derived database readable only by the operator account.
 
 The index suppresses hidden paths, configured exclusions, false frontmatter controls, private keys, known token formats, and high-confidence credential assignments. This is defense in depth, not a replacement for vault curation. Keep credentials in a secret store, not Markdown.
 
-Excluded-note metadata is limited to relative path and reason. Hermes errors disclose exception class rather than private paths or content. Search snippets are untrusted quoted source data. The runtime performs no network communication.
+Excluded-note metadata is limited to relative path and reason. SQLite is untrusted derived state: every result is re-read and re-derived from the exact source before citation. Hermes errors disclose exception class rather than private paths or content. Search snippets are untrusted quoted source data, and human rendering escapes Unicode display controls and separators. The runtime performs no network communication.
 
 ## Reporting
 

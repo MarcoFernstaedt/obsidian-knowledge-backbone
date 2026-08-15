@@ -25,14 +25,15 @@ CLI and two read-only Hermes tools with exact citations
 
 ## Privacy and correctness
 
-- Descriptor-relative, no-follow vault traversal rejects symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credential canaries. Device, inode, size, mtime, and ctime are validated across every read.
-- Configuration rejects the SQLite database and lock at or beneath the vault, including symlink-resolved and nonexistent descendants.
+- Descriptor-relative, no-follow vault traversal rejects symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credential canaries. UTF-8 BOM frontmatter and quoted scalar control keys are recognized; malformed or non-scalar controls fail closed. Device, inode, size, mtime, and ctime are validated across every read.
+- SQLite state ancestors are traversed from the filesystem root with descriptor-relative `O_NOFOLLOW` opens. The lock, database, WAL, and SHM resolve through one stable state-directory descriptor, with device/inode and live vault-containment revalidation at operation boundaries. Unsupported hosts fail closed.
 - Hidden paths, configured folders/globs, false retrieval controls, and credential-bearing notes are excluded. Excluded rows store only relative path and a reason.
 - A complete scan commits notes, chunks, FTS rows, removals, and metadata in one SQLite transaction. A failed scan leaves the previous complete generation visible.
 - Compatibility binds the corpus, schema, all chunk limits, source-size bound, and content policy. Incompatible databases are never queried.
-- Every indexed candidate is re-read through the trusted vault descriptor. A missing or changed source SHA suppresses it until refresh.
+- Every indexed candidate is re-read and re-chunked through the trusted vault descriptor. Its ID, path, title, heading, exact line span, content, snippet, digests, and FTS projection must exactly match the source-derived chunk; corrupt derived state invokes fallback and can never forge a citation.
 - Missing, corrupt, or incompatible SQLite uses a bounded in-memory filesystem lexical fallback under the same privacy, path, size, and freshness controls. Fallback never creates or modifies state.
-- Returned snippets are explicitly untrusted quoted source data, never instructions.
+- Indexed and fallback modes share non-stemming Unicode lexical tokens. FTS candidates are paged until the requested number of valid fresh results, exhaustion, or a 10,000-candidate safety bound; hitting the bound invokes filesystem fallback rather than returning a false-empty result.
+- Returned snippets are explicitly untrusted quoted source data, never instructions. Human output visibly escapes C0/C1 controls, Unicode format controls, and line/paragraph separators; JSON remains escaped.
 
 ## Install and configure
 

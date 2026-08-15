@@ -27,7 +27,7 @@ class Settings:
     max_chars: int = 1200
     overlap_lines: int = 2
     corpus_id: str = "curated-obsidian"
-    schema_version: int = 3
+    schema_version: int = 4
     chunker_version: str = "heading-v4"
     maximum_note_bytes: int = 2_097_152
     fallback_max_files: int = 5_000
@@ -135,9 +135,15 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     vault_path, state_path = Path(vault_value).expanduser(), Path(state_value).expanduser()
     if not vault_path.is_absolute(): vault_path = base / vault_path
     if not state_path.is_absolute(): state_path = base / state_path
-    vault_path, state_path = vault_path.resolve(), state_path.resolve()
-    lock_path = state_path.with_suffix(state_path.suffix + ".lock").resolve()
-    if state_path == vault_path or state_path.is_relative_to(vault_path) or lock_path == vault_path or lock_path.is_relative_to(vault_path):
+    vault_path = vault_path.resolve()
+    # Preserve the lexical state path so descriptor-relative traversal can reject
+    # symlink ancestors at use time. resolve() is used only for this initial
+    # containment check; it is never trusted as an operation path.
+    state_path = Path(os.path.abspath(state_path))
+    resolved_state = state_path.resolve()
+    lock_path = resolved_state.with_suffix(resolved_state.suffix + ".lock")
+    if (resolved_state == vault_path or resolved_state.is_relative_to(vault_path) or
+            lock_path == vault_path or lock_path.is_relative_to(vault_path)):
         raise ConfigError("state database and lock must be outside the vault")
     folders = _strings(exclusions.get("folders"), "exclusions.folders") or Settings.excluded_folders
     globs = _strings(exclusions.get("globs"), "exclusions.globs") or Settings.excluded_globs
@@ -162,5 +168,5 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     if not isinstance(corpus, str) or not corpus.strip(): raise ConfigError("corpus_id must be a non-empty string")
     return Settings(vault_path, state_path, folders, globs, hidden, keys, patterns,
                     values["max_lines"], values["max_chars"], values["overlap_lines"], corpus,
-                    3, "heading-v4", values["maximum_note_bytes"], values["fallback_max_files"],
+                    4, "heading-v4", values["maximum_note_bytes"], values["fallback_max_files"],
                     values["freshness_max_files"], includes)
