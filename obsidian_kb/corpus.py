@@ -12,7 +12,8 @@ from .chunker import chunk_markdown, is_frontmatter_excluded
 from .config import Settings
 from .lexical import fts_expression, lexical_projection
 from .privacy import contains_secret
-from .vault_io import TrustedVault, VaultPolicyError
+from .vault_io import (InventoryEntry, TrustedVault, VaultInventoryOverflow,
+                       VaultOversizeError, VaultPolicyError)
 
 
 class CorpusError(RuntimeError):
@@ -77,21 +78,34 @@ def scan(settings: Settings) -> LiveCorpus:
     started = time.perf_counter_ns()
     chunks: list[dict] = []
     eligible = excluded = total_bytes = 0
+    eligible_sources: dict[str, tuple[InventoryEntry, str]] = {}
     try:
-        with TrustedVault(settings.vault) as vault:
-            paths = vault.markdown_paths(settings.maximum_files + 1)
-            if len(paths) > settings.maximum_files:
-                raise CorpusLimitError("maximum_files exceeded; source inventory is incomplete")
-            for path in paths:
+        identity = (settings.vault_device, settings.vault_inode)
+        with TrustedVault(settings.vault, identity) as vault:
+            try:
+                before = vault.inventory(settings.maximum_files)
+            except VaultInventoryOverflow as exc:
+                raise CorpusLimitError("maximum_files exceeded; source inventory is incomplete") from exc
+            sources = [item for item in before if item.path.endswith(".md")]
+            for source in sources:
+                path = source.path
                 reason = path_exclusion_reason(path, settings)
                 if reason:
                     excluded += 1
                     continue
-                try:
-                    raw, _ = vault.read(path, settings.maximum_note_bytes)
-                except VaultPolicyError:
+                if source.kind != "regular":
                     excluded += 1
                     continue
+                if source.size > settings.maximum_note_bytes:
+                    raise CorpusLimitError("maximum_note_bytes exceeded; source inventory is incomplete")
+                try:
+                    raw, opened = vault.read(path, settings.maximum_note_bytes)
+                    if not source.same_open_file(opened):
+                        raise CorpusScanError("vault source changed; no partial corpus returned")
+                except VaultOversizeError as exc:
+                    raise CorpusLimitError("maximum_note_bytes exceeded; source inventory is incomplete") from exc
+                except VaultPolicyError as exc:
+                    raise CorpusScanError("vault source changed; no partial corpus returned") from exc
                 except OSError as exc:
                     raise CorpusScanError("vault read failed; no partial corpus returned") from exc
                 total_bytes += len(raw)
@@ -117,6 +131,30 @@ def scan(settings: Settings) -> LiveCorpus:
                     raise CorpusLimitError("maximum_chunks exceeded; source inventory is incomplete")
                 chunks.extend(note_chunks)
                 eligible += 1
+                eligible_sources[path] = (source, source_sha(raw))
+
+            try:
+                after_scan = vault.inventory(settings.maximum_files)
+            except VaultInventoryOverflow as exc:
+                raise CorpusLimitError("maximum_files exceeded; source inventory is incomplete") from exc
+            if before != after_scan:
+                raise CorpusScanError("vault inventory changed; no partial corpus returned")
+
+            # Re-read every included source at the final boundary. Metadata alone is
+            # insufficient when an attacker can preserve size and timestamps.
+            for path, (source, expected_sha) in eligible_sources.items():
+                try:
+                    current, opened = vault.read(path, settings.maximum_note_bytes)
+                except (VaultPolicyError, VaultOversizeError, OSError) as exc:
+                    raise CorpusScanError("vault source changed; no partial corpus returned") from exc
+                if not source.same_open_file(opened) or source_sha(current) != expected_sha:
+                    raise CorpusScanError("vault source changed; no partial corpus returned")
+            try:
+                final = vault.inventory(settings.maximum_files)
+            except VaultInventoryOverflow as exc:
+                raise CorpusLimitError("maximum_files exceeded; source inventory is incomplete") from exc
+            if before != final:
+                raise CorpusScanError("vault inventory changed; no partial corpus returned")
     except CorpusError:
         raise
     except OSError as exc:

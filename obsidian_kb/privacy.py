@@ -24,9 +24,10 @@ CREDENTIAL_NAME = (
     r"aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)|"
     r"[a-z0-9]+(?:[_-](?:api[_-]?key|auth[_-]?token|access[_-]?token|secret|password|token)))"
 )
-# Supports shell/env, simple YAML, and JSON object assignments.
+# Supports shell/env, simple YAML (including list mappings), and JSON object assignments.
 ASSIGNMENT = re.compile(
-    rf"(?im)(?:^|[,{{])\s*(?:export\s+)?[\"']?{CREDENTIAL_NAME}[\"']?\s*[:=]\s*"
+    rf"(?im)(?:^[ \t]*(?:-[ \t]+)?|[,{{][ \t]*)"
+    rf"(?:export[ \t]+)?[\"']?{CREDENTIAL_NAME}[\"']?[ \t]*[:=][ \t]*"
     r"(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,#}]+)")
 PLACEHOLDER = re.compile(
     r"^(?:<[^>]+>|\$\{?[A-Z_][A-Z0-9_]*\}?|\$[A-Z_][A-Z0-9_]*|%[A-Z_][A-Z0-9_]*%|"

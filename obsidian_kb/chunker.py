@@ -7,6 +7,8 @@ import json
 import re
 import uuid
 
+from .config import normalize_control_key
+
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
 APPLICATION_NAMESPACE = uuid.UUID("598f094b-a203-5a8f-8cca-81edc80aaed4")
@@ -67,46 +69,50 @@ def frontmatter(text: str, control_keys: tuple[str, ...] = ()) -> tuple[dict[str
             return {"__malformed__": "true"}, 0
         if lines[index].strip() == "---":
             values: dict[str, str] = {}
-            controls = {key.casefold() for key in control_keys} | {"imperator_retrieval"}
-            previous_key: str | None = None
+            controls = {normalize_control_key(key) for key in control_keys} | {"imperator_retrieval"}
+            previous_control = False
             for line in lines[1:index]:
                 if not line.strip() or line.lstrip().startswith("#"):
                     continue
-                if line[:1].isspace():
-                    if previous_key in controls:
-                        return {"__malformed__": "true"}, 0
-                    if previous_key is None:
+                indent = len(line) - len(line.lstrip(" \t"))
+                candidate = line.lstrip(" \t")
+                list_item = candidate.startswith("-") and len(candidate) > 1 and candidate[1].isspace()
+                if list_item:
+                    candidate = candidate[1:].lstrip(" \t")
+                if ":" not in candidate:
+                    if previous_control:
                         return {"__malformed__": "true"}, 0
                     continue
-                if line.startswith("-") and previous_key and previous_key not in controls and not values.get(previous_key):
-                    # YAML permits an indentationless sequence as a mapping value.
-                    continue
-                if ":" not in line:
-                    return {"__malformed__": "true"}, 0
-                key, value = line.split(":", 1)
+                key, value = candidate.split(":", 1)
                 decoded_key = _mapping_key(key)
-                normalized_key = decoded_key.casefold() if decoded_key else ""
-                if not normalized_key or normalized_key in values:
+                normalized_key = normalize_control_key(decoded_key) if decoded_key else ""
+                if not normalized_key:
                     return {"__malformed__": "true"}, 0
-                previous_key = normalized_key
+                is_control = normalized_key in controls
+                if is_control and (indent or list_item or normalized_key in values):
+                    # A retrieval control is authoritative only as one unique top-level scalar.
+                    # Seeing it anywhere nested/indented/list-valued is ambiguous and excludes.
+                    return {"__malformed__": "true"}, 0
+                previous_control = is_control
+                if not is_control:
+                    continue
                 raw_value = value.strip()
-                if normalized_key in controls:
-                    # Retrieval controls are deliberately limited to plain/quoted scalars.
-                    if raw_value.startswith(("'", '"')):
-                        quote = raw_value[0]; closing = raw_value.find(quote, 1)
-                        if closing < 1 or raw_value[closing + 1:].strip()[:1] not in {"", "#"}:
-                            return {"__malformed__": "true"}, 0
-                        raw_value = raw_value[:closing + 1]
-                    else:
-                        raw_value = raw_value.split(" #", 1)[0].rstrip()
-                    if not raw_value or raw_value[:1] in "[{&*!|>" or ":" in raw_value:
+                # Retrieval controls are deliberately limited to plain/quoted scalars.
+                if raw_value.startswith(("'", '"')):
+                    quote = raw_value[0]; closing = raw_value.find(quote, 1)
+                    if closing < 1 or raw_value[closing + 1:].strip()[:1] not in {"", "#"}:
                         return {"__malformed__": "true"}, 0
-                    scalar = raw_value.casefold().strip("'\"")
-                    allowed = ({"exclude", "include"} if normalized_key == "imperator_retrieval" else
-                               {"true", "false", "yes", "no", "on", "off", "1", "0"})
-                    if scalar not in allowed:
-                        return {"__malformed__": "true"}, 0
-                values[normalized_key] = raw_value.casefold().strip("'\"")
+                    raw_value = raw_value[:closing + 1]
+                else:
+                    raw_value = raw_value.split(" #", 1)[0].rstrip()
+                if not raw_value or raw_value[:1] in "[{&*!|>" or ":" in raw_value:
+                    return {"__malformed__": "true"}, 0
+                scalar = raw_value.casefold().strip("'\"")
+                allowed = ({"exclude", "include"} if normalized_key == "imperator_retrieval" else
+                           {"true", "false", "yes", "no", "on", "off", "1", "0"})
+                if scalar not in allowed:
+                    return {"__malformed__": "true"}, 0
+                values[normalized_key] = scalar
             return values, index + 1
     return {"__malformed__": "true"}, 0
 
@@ -116,7 +122,8 @@ def is_frontmatter_excluded(text: str, keys: tuple[str, ...]) -> bool:
     if values.get("__malformed__") == "true":
         return True
     return (values.get("imperator_retrieval") == "exclude" or
-            any(values.get(key.lower()) in {"false", "no", "0", "off"} for key in keys))
+            any(values.get(normalize_control_key(key)) in {"false", "no", "0", "off"}
+                for key in keys))
 
 
 def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int, overlap_lines: int):

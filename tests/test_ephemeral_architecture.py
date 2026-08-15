@@ -122,6 +122,96 @@ class EphemeralArchitectureTests(unittest.TestCase):
         self.assertFalse(failed["source_inventory_complete"])
         self.assertFalse(failed["current"])
 
+    def test_oversized_regular_note_is_fatal_not_excluded_or_current(self):
+        (self.vault / "oversized.md").write_text("# Oversized\n" + "x" * 128)
+        bounded = Settings(self.vault, maximum_note_bytes=32)
+        with self.assertRaises(CorpusLimitError):
+            search(bounded, "oversized")
+        failed = audit(bounded)
+        self.assertEqual(failed["error_class"], "CorpusLimitError")
+        self.assertFalse(failed["source_inventory_complete"])
+        self.assertFalse(failed["current"])
+        self.assertEqual(failed["excluded_notes"], 0)
+        rendered = json.dumps(failed)
+        self.assertNotIn("oversized.md", rendered)
+        self.assertNotIn(str(self.vault), rendered)
+        self.assertNotIn("x" * 16, rendered)
+
+    def test_control_key_projection_nested_controls_and_yaml_secret_lists_fail_closed(self):
+        settings = Settings(self.vault, frontmatter_false_keys=("KNOWLEDGE_ẞ", "index"))
+        notes = {
+            "unicode.md": "---\nKNOWLEDGE_SS: false\n---\n# Private\nunicodecanary\n",
+            "nested.md": "---\nmeta:\n  index: false\n---\n# Private\nnestedcanary\n",
+            "list-secret.md": "# Private\n- api_key: hunter2-secret\nlistcanary\n",
+            "indented-secret.md": "# Private\n  - token: hunter2-secret\nindentcanary\n",
+        }
+        for name, text in notes.items():
+            (self.vault / name).write_text(text)
+        for canary in ("unicodecanary", "nestedcanary", "listcanary", "indentcanary"):
+            self.assertEqual(search(settings, canary)["results"], [])
+
+        (self.vault / "ordinary-metadata.md").write_text(
+            "---\nmeta:\n  owner: docs\ntags:\n  - safe\n---\n# Public\nordinarycanary\n"
+        )
+        self.assertEqual(search(settings, "ordinarycanary")["results"][0]["path"],
+                         "ordinary-metadata.md")
+
+    def test_control_key_configuration_rejects_ambiguous_or_dangerous_names(self):
+        for keys in (("index", "INDEX"), ("imperator_retrieval",), ("bad:key",), ("bad\nkey",)):
+            with self.subTest(keys=keys), self.assertRaises(ConfigError):
+                Settings(self.vault, frontmatter_false_keys=keys)
+
+    def test_bound_vault_root_rejects_replaced_symlink_ancestor(self):
+        approved = self.root / "approved"
+        approved.mkdir()
+        bound_vault = approved / "vault"
+        bound_vault.mkdir()
+        (bound_vault / "safe.md").write_text("# Safe\nsafecanary\n")
+        settings = Settings(bound_vault)
+        displaced = self.root / "displaced"
+        approved.rename(displaced)
+        foreign = self.root / "foreign"
+        (foreign / "vault").mkdir(parents=True)
+        (foreign / "vault/foreign.md").write_text("# Foreign\nforeigncanary\n")
+        approved.symlink_to(foreign, target_is_directory=True)
+        with self.assertRaises(CorpusScanError):
+            search(settings, "foreigncanary")
+
+    def test_scan_aborts_on_exact_post_inventory_insertion(self):
+        (self.vault / "first.md").write_text("# First\nfirstcanary\n")
+        original = TrustedVault.inventory
+        calls = 0
+
+        def inventory(bound, maximum_entries):
+            nonlocal calls
+            result = original(bound, maximum_entries)
+            calls += 1
+            if calls == 1:
+                (self.vault / "late.md").write_text("# Late\nlatecanary\n")
+            return result
+
+        with patch.object(TrustedVault, "inventory", inventory):
+            with self.assertRaises(CorpusScanError):
+                search(self.settings, "firstcanary")
+
+    def test_scan_aborts_on_exact_post_read_mutation(self):
+        note = self.vault / "race.md"
+        note.write_text("# Race\noldcanary\n")
+        original = TrustedVault.read
+        reads = 0
+
+        def read(bound, relative_path, maximum_bytes):
+            nonlocal reads
+            result = original(bound, relative_path, maximum_bytes)
+            reads += 1
+            if reads == 1:
+                note.write_text("# Race\nnewcanary\n")
+            return result
+
+        with patch.object(TrustedVault, "read", read):
+            with self.assertRaises(CorpusScanError):
+                search(self.settings, "oldcanary")
+
     def test_privacy_controls_credentials_prefix_and_bounds(self):
         (self.vault / "Allowed").mkdir()
         (self.vault / "Other").mkdir()

@@ -9,12 +9,12 @@ read-only vault -> privacy/eligibility gate -> exact bounded chunks
                 -> process-private SQLite :memory: FTS5 -> cited results -> close
 ```
 
-Only exact current source participates in retrieval. Search cannot be stale because all eligible chunks are collected before the in-memory query runs. Any unknown read or configured resource overflow fails closed without a partial corpus.
+Only exact current source participates in retrieval. Search cannot be stale because descriptor-bound inventories bracket the scan, included and excluded source metadata is revalidated, and every eligible note is re-read and SHA-256 checked at the final boundary before the in-memory query runs. Any unknown read, concurrent source drift, or configured resource overflow fails closed without a partial corpus.
 
 ## Privacy and correctness
 
-- `TrustedVault` holds the approved root descriptor and uses descriptor-relative no-follow traversal and reads. Symlinks, non-regular entries, read races, and oversized notes are rejected.
-- Hidden paths, configured folders/globs, UTF-8 BOM or quoted false frontmatter controls, malformed retrieval controls, and credential-bearing notes are excluded.
+- `TrustedVault` binds the approved root device/inode at configuration load, reopens it from `/` through descriptor-relative `O_DIRECTORY|O_NOFOLLOW` traversal, and rejects every symlink/non-directory ancestor or identity change. Descendant enumeration and reads remain descriptor-relative and no-follow.
+- Hidden paths, configured folders/globs, symlinks/non-regular entries, UTF-8 BOM or quoted false frontmatter controls, malformed/nested retrieval controls, and credential-bearing notes are excluded. Oversized eligible regular notes are fatal resource overflow, not exclusions.
 - Limits bound files, chunks, total bytes, note bytes, query length, result count, and path prefixes. Overflow reports incomplete/failure, never current.
 - FTS5 uses `unicode61 remove_diacritics 2`, exact non-stemming query tokens, a fixed documented English stop-word set, and BM25 weights of title `8`, heading `5`, path `3`, content `1`. Terms are OR-combined without prefix, fuzzy, or hidden expansion. Ties use path then FTS row order.
 - Citations, headings, snippets, paths, and line spans come directly from the same exact chunks inserted into the private in-memory database.

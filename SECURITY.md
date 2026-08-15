@@ -6,11 +6,11 @@ Security fixes target the current `main` branch and latest tagged release.
 
 ## Data boundary
 
-The vault is read-only. A complete search/status/audit opens one trusted vault root and traverses descendants with descriptor-relative no-follow operations. Symlinks, non-regular files, changed-during-read sources, and configured limits fail closed.
+The vault is read-only. Configuration binds the approved root device/inode. A complete search/status/audit reopens every absolute root component through descriptor-relative no-follow directory operations, compares the configured identity, and traverses descendants the same way. Symlinks, non-regular files, changed-during-read sources, scan-wide inventory drift, and configured limits fail closed.
 
 Eligible exact chunks are inserted only into a process-private SQLite FTS5 database opened as `:memory:`. The connection is closed before results return. Runtime retrieval creates no filesystem artifact and opens no network connection.
 
-Hidden/configured paths, false or malformed retrieval controls, private keys, known token formats, and high-confidence credential assignments are suppressed. This is defense in depth, not a replacement for vault curation. Unknown/transient read failures and file/chunk/byte overflow abort the complete operation; no partial result is returned.
+Hidden/configured paths, false or malformed/nested retrieval controls, private keys, known token formats, and high-confidence credential assignments (including YAML list mappings) are suppressed. This is defense in depth, not a replacement for vault curation. Unknown/transient read failures and file/chunk/byte overflow abort the complete operation; an oversized eligible regular note is never reported as a safe exclusion, and no partial result is returned.
 
 Hermes errors disclose exception class rather than private paths or content. Status is path-free. Search passages are untrusted quoted source data, and human rendering escapes Unicode display controls and separators.
 

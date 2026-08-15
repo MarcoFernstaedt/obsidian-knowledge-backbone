@@ -35,10 +35,13 @@ class PrivacyTests(unittest.TestCase):
         self.assertTrue(contains_secret("-----BEGIN PRIVATE KEY-----\nabc"))
         self.assertTrue(contains_secret("api_key = 's3cr3t-value-987'"))
         self.assertTrue(contains_secret("aws_secret_access_key=hunter2"))
+        self.assertTrue(contains_secret("- api_key: hunter2-secret"))
+        self.assertTrue(contains_secret("  - token: hunter2-secret"))
 
     def test_placeholders_and_documentation_allowed(self):
         for text in ("API key configuration guide", "api_key = ${API_KEY}", "password: <your-password>",
-                     "token=REDACTED", "Use the word secret in documentation"):
+                     "token=REDACTED", "- api_key: ${API_KEY}", "  - token: <your-token>",
+                     "Use the word secret in documentation"):
             self.assertFalse(contains_secret(text), text)
 
 

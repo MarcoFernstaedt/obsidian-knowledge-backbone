@@ -7,13 +7,14 @@ The curated Markdown vault is the sole content authority and is never written. E
 ## Live corpus flow
 
 1. Validate the fixed private config. Unsupported and unknown sections fail closed.
-2. Open the approved vault root once. Enumerate and read through descriptor-relative no-follow operations.
+2. Bind the approved root device/inode during configuration. Reopen it by traversing every absolute path component from `/` with descriptor-relative no-follow directory operations, reject identity drift, then enumerate/read descendants through the held root descriptor.
 3. Apply path rules before content reads, then source-size, UTF-8, bounded frontmatter, explicit opt-out, and credential controls.
 4. Abort the whole operation on unknown/transient traversal or read errors. Deterministic policy exclusions count safely. Abort as incomplete on file, chunk, or total-byte overflow.
-5. Chunk every eligible current note by headings with exact inclusive source spans and deterministic corpus/policy/path/ordinal UUIDv5 identities.
-6. Only after the complete corpus exists, open SQLite with the literal `:memory:` database name, create FTS5, insert all chunks, query, and close it.
+5. Compare descriptor-bound recursive inventories before and after scanning, revalidate included/excluded source identity/size/timestamps, re-read every eligible note to verify its current SHA-256, and compare a final inventory. Any insertion, removal, replacement, or content change aborts.
+6. Chunk every eligible current note by headings with exact inclusive source spans and deterministic corpus/policy/path/ordinal UUIDv5 identities.
+7. Only after the complete corpus exists, open SQLite with the literal `:memory:` database name, create FTS5, insert all chunks, query, and close it.
 
-No source drift protocol is required: source and retrieval are one operation. No partial corpus is queryable.
+The scan-wide snapshot protocol prevents a successful stale or incomplete result across concurrent source changes. No partial corpus is queryable.
 
 ## Retrieval
 

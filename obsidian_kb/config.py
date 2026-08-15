@@ -1,17 +1,40 @@
 """Strict fixed TOML configuration for read-only live vault retrieval."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
 import tomllib
+import unicodedata
+
+from .vault_io import bind_vault_root
 
 
 class ConfigError(ValueError):
     """Raised when configuration is missing, unsafe, or malformed."""
+
+
+def normalize_control_key(value: str) -> str:
+    """Canonical projection shared by configuration and frontmatter parsing."""
+    return unicodedata.normalize("NFKC", value).casefold()
+
+
+def _control_keys(values: tuple[str, ...]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    forbidden = set(":#[]{}&,*!?|>'\"%@`")
+    for value in values:
+        key = normalize_control_key(value)
+        if (not key or key == "imperator_retrieval" or key.startswith("-")
+                or any(char.isspace() or unicodedata.category(char)[0] in {"C", "Z"}
+                       or char in forbidden for char in key)):
+            raise ConfigError("frontmatter control keys contain an unsafe or reserved name")
+        if key in normalized:
+            raise ConfigError("frontmatter control keys are ambiguous after Unicode normalization")
+        normalized.append(key)
+    return tuple(normalized)
 
 
 @dataclass(frozen=True)
@@ -31,6 +54,22 @@ class Settings:
     maximum_chunks: int = 50_000
     maximum_total_bytes: int = 268_435_456
     include_globs: tuple[str, ...] = ("*.md", "**/*.md")
+    vault_device: int = field(init=False, repr=False)
+    vault_inode: int = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        lexical = Path(self.vault).expanduser()
+        if not lexical.is_absolute():
+            lexical = Path(os.path.abspath(lexical))
+        projected = _control_keys(tuple(self.frontmatter_false_keys))
+        try:
+            device, inode = bind_vault_root(lexical)
+        except OSError as exc:
+            raise ConfigError("vault root cannot be identity-bound safely") from exc
+        object.__setattr__(self, "vault", lexical)
+        object.__setattr__(self, "frontmatter_false_keys", projected)
+        object.__setattr__(self, "vault_device", device)
+        object.__setattr__(self, "vault_inode", inode)
 
     def compatibility_signature(self) -> str:
         policy = {
@@ -136,7 +175,7 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     vault_path = Path(vault_value).expanduser()
     if not vault_path.is_absolute():
         vault_path = base / vault_path
-    vault_path = vault_path.resolve()
+    vault_path = Path(os.path.abspath(vault_path))
     folders = _strings(exclusions.get("folders"), "exclusions.folders") or Settings.excluded_folders
     globs = _strings(exclusions.get("globs"), "exclusions.globs") or Settings.excluded_globs
     includes = _strings(exclusions.get("include_globs"), "exclusions.include_globs") or Settings.include_globs
