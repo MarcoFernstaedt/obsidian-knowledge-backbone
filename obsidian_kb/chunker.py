@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 import hashlib
 import re
+import uuid
 
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 
@@ -11,6 +12,7 @@ HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 @dataclass(frozen=True)
 class Chunk:
     chunk_id: str
+    point_id: str
     file_path: str
     title: str
     heading_path: tuple[str, ...]
@@ -99,6 +101,7 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
                 continue
             start, end = part[0][0], part[-1][0]
             digest = hashlib.sha256(f"{file_path}\0{start}\0{end}\0{content}".encode()).hexdigest()
-            chunks.append(Chunk(digest, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+            point_id = str(uuid.UUID(hex=digest[:32]))
+            chunks.append(Chunk(digest, point_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
                                 heading_path, start, end, content, content[:320], source_sha256).as_dict())
     return chunks

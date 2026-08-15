@@ -61,7 +61,7 @@ class Store:
                 heading = " > ".join(chunk["heading_path"])
                 values = (chunk["chunk_id"], path, chunk["title"], json.dumps(chunk["heading_path"]),
                           chunk["start_line"], chunk["end_line"], chunk["content"], chunk["snippet"],
-                          source_sha, chunk["chunk_id"], int(semantic_ready))
+                          source_sha, chunk["point_id"], int(semantic_ready))
                 self.conn.execute("INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
                 self.conn.execute("INSERT INTO chunks_fts(chunk_id,title,heading,content) VALUES (?,?,?,?)",
                                   (chunk["chunk_id"], chunk["title"], heading, chunk["content"]))

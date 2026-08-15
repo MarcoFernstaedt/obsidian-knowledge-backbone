@@ -1,5 +1,6 @@
 import hashlib
 import unittest
+import uuid
 
 from obsidian_kb.chunker import chunk_markdown, is_frontmatter_excluded
 from obsidian_kb.privacy import contains_secret
@@ -14,6 +15,7 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(chunks[1]["heading_path"], ["Root", "Child"])
         self.assertEqual(chunks[1]["start_line"], 6)
         self.assertNotIn("tags", " ".join(c["content"] for c in chunks))
+        self.assertEqual(str(uuid.UUID(chunks[0]["point_id"])), chunks[0]["point_id"])
 
     def test_bounded_splits_preserve_source_spans(self):
         text = "# T\n" + "\n".join(f"line {i}" for i in range(8))

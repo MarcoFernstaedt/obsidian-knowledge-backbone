@@ -91,12 +91,12 @@ class Indexer:
                     if any(len(vector) != self.settings.vector_size for vector in vectors):
                         raise RemoteError("embedding vector size mismatch")
                     self.qdrant.ensure()
-                    self.qdrant.upsert([{"id": c["chunk_id"], "vector": v, "payload": {"chunk_id": c["chunk_id"]}}
+                    self.qdrant.upsert([{"id": c["point_id"], "vector": v, "payload": {"chunk_id": c["chunk_id"]}}
                                         for c, v in zip(chunks, vectors)])
                     semantic_ready = True
                 except RemoteError:
                     warnings.append(f"semantic indexing unavailable for {path}; lexical index committed")
-            self._delete_remote([point for point in old_points if point not in {c['chunk_id'] for c in chunks}], warnings)
+            self._delete_remote([point for point in old_points if point not in {c['point_id'] for c in chunks}], warnings)
             self.store.replace_note(path, digest, chunks, semantic_ready); changed += 1
         for path in sorted(self.store.paths() - seen):
             self._delete_remote(self.store.point_ids(path), warnings)
