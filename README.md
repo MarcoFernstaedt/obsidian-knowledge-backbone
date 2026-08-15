@@ -75,7 +75,7 @@ This is exact point-in-time evidence, not a perpetual-current index. Re-read cit
 Install the repository through Hermes' native plugin workflow, then enable it:
 
 ```bash
-hermes plugins install owner/obsidian-knowledge-backbone --no-enable
+hermes plugins install MarcoFernstaedt/obsidian-knowledge-backbone --no-enable
 hermes plugins enable obsidian-knowledge-backbone
 hermes plugins list
 ```
