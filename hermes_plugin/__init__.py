@@ -8,8 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from obsidian_kb.config import load_settings, validate_relative_prefix
-from obsidian_kb.search import search
-from obsidian_kb.store import Store
+from obsidian_kb.search import search, status_with_freshness
 
 CONFIG_ENV="OBSIDIAN_KB_CONFIG"
 SEARCH_SCHEMA={
@@ -27,7 +26,7 @@ STATUS_SCHEMA={"name":"obsidian_knowledge_status","description":"Read-only index
 def _settings():
     path=os.environ.get(CONFIG_ENV)
     if not path:raise ValueError(f"{CONFIG_ENV} is required")
-    return load_settings(path)
+    return load_settings(path,require_private=True)
 
 
 def obsidian_knowledge_search(args:dict,**_kwargs)->str:
@@ -47,10 +46,7 @@ def obsidian_knowledge_search(args:dict,**_kwargs)->str:
 def obsidian_knowledge_status(args:dict|None=None,**_kwargs)->str:
     try:
         if args not in (None,{}) or (isinstance(args,dict) and args):raise ValueError("status accepts no arguments")
-        settings=_settings()
-        store=Store(settings.state,settings=settings,read_only=True)
-        try:payload={"ok":True,"index":store.status()}
-        finally:store.close()
+        payload={"ok":True,"index":status_with_freshness(_settings())}
     except (Exception,sqlite3.Error) as exc:payload={"ok":False,"error":f"knowledge status failed: {type(exc).__name__}"}
     return json.dumps(payload,sort_keys=True)
 

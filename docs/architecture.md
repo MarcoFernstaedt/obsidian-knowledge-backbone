@@ -4,18 +4,18 @@
 
 The Markdown vault is the content authority and is never written. SQLite is the sole desired-state, retry, and lexical-index authority. Qdrant is a disposable semantic projection; remote points cannot authorize content. Every returned SQLite candidate is revalidated against the current exact source bytes and eligibility policy.
 
-Excluded notes store only relative path and reason. Qdrant payloads contain exactly `corpus_id`, `schema_version`, `chunk_id`, `content_sha256`, and `embedding_model`; they never contain note text, title, path, heading, snippet, or frontmatter. Retrieved passages are explicitly untrusted quoted source data.
+Excluded notes store only relative path and reason. Qdrant payloads contain exactly `corpus_id`, index `schema_version`, `chunk_id`, `content_sha256`, `embedding_model`, `model_digest`, and `compatibility_signature`; they never contain note text, title, path, heading, snippet, or frontmatter. Retrieved passages are explicitly untrusted quoted source data.
 
 ## Index flow and crash recovery
 
 1. Acquire the private nonblocking index lock.
-2. Classify path exclusions before reading content, then reject symlinks, outside-root resolution, oversized files, malformed/excluded frontmatter, and credential canaries.
+2. Classify path exclusions before reading content, then traverse with descriptor-relative no-follow opens from a trusted root and reject symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credential canaries.
 3. Chunk allowed Markdown by heading with exact inclusive source spans and corpus/path/ordinal UUIDv5 identities.
-4. Atomically commit notes, chunks, FTS rows, pending semantic projections, and tombstones to SQLite.
+4. Atomically commit the complete scan's notes, chunks, FTS rows, pending semantic projections, and tombstones in one SQLite transaction. Any note failure rolls the whole scan back to the previous complete generation.
 5. Publish pending vectors to the side-by-side Qdrant collection, then mark each projection applied locally. A crash after network publication retries the same UUID upsert idempotently.
-6. Apply durable tombstones. Optional full reconciliation compares all active local IDs with remote IDs filtered to the corpus and removes remote orphans.
+6. Apply durable tombstones using corpus-plus-signature-scoped deletion. Optional full reconciliation compares active local IDs only with remote IDs filtered to the same corpus and signature and cannot delete another generation.
 
-SQLite uses WAL, foreign keys, explicit transactions, and a busy timeout. Metadata binds schema, corpus, collection, embedding model/digest, vector size, chunker version, and policy fingerprint. A mismatch fails closed and requires a fresh side-by-side index/collection, preventing mixed vector generations.
+SQLite uses WAL, foreign keys, explicit transactions, and a busy timeout. Metadata binds index schema 2, corpus, collection, embedding model/digest, vector size, chunker version, and policy fingerprint. Qdrant preflight rejects any existing point in the corpus whose signature/model digest is absent or mismatched before upsert or destructive reconciliation. Configuration schema 1 and public result schema `1.0` are distinct contracts, not index-version downgrades.
 
 ## Retrieval flow
 

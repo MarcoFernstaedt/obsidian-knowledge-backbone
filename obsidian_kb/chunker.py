@@ -7,6 +7,7 @@ import re
 import uuid
 
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
+FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
 APPLICATION_NAMESPACE = uuid.UUID("598f094b-a203-5a8f-8cca-81edc80aaed4")
 
 
@@ -61,24 +62,37 @@ def is_frontmatter_excluded(text: str, keys: tuple[str, ...]) -> bool:
             any(values.get(key.lower()) in {"false", "no", "0", "off"} for key in keys))
 
 
-def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int):
-    current: list[tuple[int, str]] = []
-    size = 0
-    for line_number, line in parts:
-        segments = [line[i:i + max_chars] for i in range(0, len(line), max_chars)] or [""]
-        for segment in segments:
-            extra = len(segment) + (1 if current else 0)
-            if current and (len(current) >= max_lines or size + extra > max_chars):
-                yield current
-                current, size = [], 0
-            current.append((line_number, segment))
-            size += len(segment) + (1 if len(current) > 1 else 0)
-    if current:
-        yield current
+def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int, overlap_lines: int):
+    expanded: list[tuple[int, str]] = []
+    for number, line in parts:
+        expanded.extend((number, line[i:i + max_chars]) for i in range(0, len(line), max_chars))
+        if not line: expanded.append((number, ""))
+    start = 0
+    while start < len(expanded):
+        end = start
+        size = 0
+        while end < len(expanded) and end - start < max_lines:
+            extra = len(expanded[end][1]) + (1 if end > start else 0)
+            if end > start and size + extra > max_chars: break
+            size += extra; end += 1
+        if end == start: end += 1
+        # Prefer the latest complete paragraph boundary when more data remains.
+        if end < len(expanded):
+            blanks = [i for i in range(start + 1, end) if not expanded[i][1].strip()]
+            if blanks: end = blanks[-1] + 1
+        part = expanded[start:end]
+        yield part
+        if end >= len(expanded): break
+        overlap = min(overlap_lines, max(0, len(part) - 1))
+        next_start = end - overlap
+        # Overlap must not make the next piece exceed configured character bounds.
+        while overlap and sum(len(x[1]) for x in expanded[next_start:min(len(expanded), next_start + max_lines)]) + max_lines > max_chars:
+            overlap -= 1; next_start = end - overlap
+        start = max(start + 1, next_start)
 
 
 def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: int = 60,
-                   max_chars: int = 6000, corpus_id: str = "curated-obsidian") -> list[dict]:
+                   max_chars: int = 6000, corpus_id: str = "curated-obsidian", overlap_lines: int = 2) -> list[dict]:
     lines = text.splitlines()
     _, body_offset = frontmatter(text)
     stack: list[str] = []
@@ -86,12 +100,19 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
     current_path: tuple[str, ...] = ()
     current: list[tuple[int, str]] = []
     title = ""
-    fenced = False
+    fence_marker: str | None = None
+    fence_length = 0
     for index in range(body_offset, len(lines)):
         line = lines[index]
-        match = None if fenced else HEADING.match(line)
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+        fence = FENCE.match(line)
+        if fence_marker is None:
+            match = HEADING.match(line)
+            if fence:
+                fence_marker, fence_length = fence.group(1)[0], len(fence.group(1))
+        else:
+            match = None
+            if fence and fence.group(1)[0] == fence_marker and len(fence.group(1)) >= fence_length and not fence.group(2).strip():
+                fence_marker, fence_length = None, 0
         if match:
             if current:
                 sections.append((current_path, current))
@@ -109,7 +130,7 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
     for heading_path, section in sections:
         if not any(line.strip() and not HEADING.match(line) for _, line in section):
             continue
-        for part in _bounded(section, max_lines, max_chars):
+        for part in _bounded(section, max_lines, max_chars, min(2, max(0, overlap_lines))):
             content = "\n".join(line for _, line in part).strip()
             if not content:
                 continue

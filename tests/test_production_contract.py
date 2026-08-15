@@ -24,19 +24,19 @@ class FakeOllama:
 
 class FakeQdrant:
     def __init__(self, fail=False): self.fail = fail; self.points = {}; self.deleted = []
-    def ensure(self, signature=None):
+    def ensure(self, corpus=None, signature=None, model_digest=None):
         from obsidian_kb.remote import RemoteError
         if self.fail: raise RemoteError("offline")
     def upsert(self, points):
         from obsidian_kb.remote import RemoteError
         if self.fail: raise RemoteError("offline")
         self.points.update({p["id"]: p for p in points})
-    def delete(self, ids):
+    def delete(self, ids, corpus=None, signature=None):
         from obsidian_kb.remote import RemoteError
         if self.fail: raise RemoteError("offline")
         self.deleted.extend(ids); [self.points.pop(i, None) for i in ids]
-    def query(self, vector, limit, corpus_id=None): return list(self.points.values())[:limit]
-    def list_ids(self, corpus_id): return list(self.points)
+    def query(self, vector, limit, corpus_id=None, signature=None): return list(self.points.values())[:limit]
+    def list_ids(self, corpus_id, signature=None): return list(self.points)
 
 
 class ProductionContractTests(unittest.TestCase):
@@ -154,7 +154,7 @@ class ProductionContractTests(unittest.TestCase):
         self.assertEqual(second["pending_vectors"],0)
         self.assertEqual(len(remote.points),1)
         payload=next(iter(remote.points.values()))["payload"]
-        self.assertEqual(set(payload),{"corpus_id","schema_version","chunk_id","content_sha256","embedding_model"})
+        self.assertEqual(set(payload),{"corpus_id","schema_version","chunk_id","content_sha256","embedding_model","model_digest","compatibility_signature"})
         self.assertNotIn("private prose",json.dumps(payload))
         third=self.run_index(ollama=FakeOllama(),qdrant=remote)
         self.assertEqual(third["changed"],0)

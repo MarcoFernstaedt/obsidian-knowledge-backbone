@@ -16,7 +16,7 @@ class Response:
     def __init__(self, payload): self.payload = json.dumps(payload).encode()
     def __enter__(self): return self
     def __exit__(self, *args): return False
-    def read(self): return self.payload
+    def read(self, amount=-1): return self.payload if amount < 0 else self.payload[:amount]
 
 
 class RemoteTests(unittest.TestCase):
@@ -83,8 +83,8 @@ class ConfigCliTests(unittest.TestCase):
                      ["status", "--config", str(self.config), "--json"]):
             output = io.StringIO()
             with patch("sys.stdout", output): code = main(argv)
-            self.assertEqual(code, 4 if argv[0] == "index" else 0, (argv, output.getvalue()))
-            self.assertTrue(json.loads(output.getvalue())["ok"])
+            self.assertEqual(code, 4 if argv[0] in {"index", "audit"} else 0, (argv, output.getvalue()))
+            self.assertEqual(json.loads(output.getvalue())["ok"], argv[0] != "audit")
         query_output = io.StringIO()
         with patch("sys.stdout", query_output): main(["query", "searchable", "--config", str(self.config), "--offline", "--json"])
         item = json.loads(query_output.getvalue())["results"][0]
@@ -92,7 +92,7 @@ class ConfigCliTests(unittest.TestCase):
 
     def test_status_missing_index_has_meaningful_exit(self):
         with patch("sys.stdout", io.StringIO()): code = main(["status", "--config", str(self.config), "--json"])
-        self.assertEqual(code, 3)
+        self.assertEqual(code, 2)
 
 
 if __name__ == "__main__": unittest.main()

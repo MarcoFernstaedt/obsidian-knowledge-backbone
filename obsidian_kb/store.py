@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
 import sqlite3
@@ -51,10 +52,12 @@ def _now() -> str:
 
 
 class Store:
-    def __init__(self, path: str | Path, *, settings: "Settings | None" = None, read_only: bool = False):
-        self.path = Path(path); self.settings = settings
+    def __init__(self, path: str | Path, *, settings: "Settings | None" = None, read_only: bool = False,
+                 immutable: bool = False):
+        self.path = Path(path); self.settings = settings; self._scan_transaction = False
         if read_only:
-            self.conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            suffix = "&immutable=1" if immutable else ""
+            self.conn = sqlite3.connect(f"file:{self.path}?mode=ro{suffix}", uri=True, timeout=5)
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             try: self.path.parent.chmod(0o700)
@@ -96,12 +99,27 @@ class Store:
             self.set_metadata("compatibility_json",json.dumps(self.settings.compatibility(),sort_keys=True,separators=(",",":")))
 
     def close(self): self.conn.close()
+    @contextmanager
+    def scan_transaction(self):
+        if self._scan_transaction: raise RuntimeError("nested scan transaction")
+        self.conn.execute("BEGIN IMMEDIATE"); self._scan_transaction = True
+        try: yield
+        except Exception:
+            self.conn.rollback(); raise
+        else: self.conn.commit()
+        finally: self._scan_transaction = False
+    def _write(self): return nullcontext() if self._scan_transaction else self.conn
     def metadata(self,key: str) -> str | None:
         row=self.conn.execute("SELECT value FROM metadata WHERE key=?",(key,)).fetchone()
         return row[0] if row else None
     def set_metadata(self,key: str,value: str) -> None:
-        self.conn.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)",(key,value)); self.conn.commit()
+        self.conn.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)",(key,value))
+        if not self._scan_transaction: self.conn.commit()
     def paths(self) -> set[str]: return {row[0] for row in self.conn.execute("SELECT path FROM notes")}
+    def complete_scan(self) -> None:
+        generation = int(self.metadata("scan_generation") or "0") + 1
+        self.conn.execute("UPDATE notes SET scan_generation=?", (generation,))
+        self.set_metadata("scan_generation", str(generation)); self.set_metadata("generated_at", _now())
     def note(self,path: str): return self.conn.execute("SELECT * FROM notes WHERE path=?",(path,)).fetchone()
     def point_ids(self,path: str) -> list[str]: return [r[0] for r in self.conn.execute("SELECT point_id FROM chunks WHERE note_path=?",(path,))]
     def needs_semantic(self,path: str) -> bool:
@@ -110,7 +128,7 @@ class Store:
     def replace_note(self,path: str,source_sha: str,chunks: list[dict],semantic_ready: bool=False,
                      *,mtime_ns: int=0,size_bytes: int=0,generation: int=0):
         now=_now()
-        with self.conn:
+        with self._write():
             old={r["chunk_id"]:dict(r) for r in self.conn.execute("SELECT c.*,p.applied_sha256 FROM chunks c LEFT JOIN semantic_projection p USING(chunk_id) WHERE note_path=?",(path,))}
             new_ids={c["chunk_id"] for c in chunks}
             for chunk_id in sorted(set(old)-new_ids):
@@ -138,7 +156,7 @@ class Store:
 
     def exclude(self,path: str,reason: str):
         now=_now()
-        with self.conn:
+        with self._write():
             rows=list(self.conn.execute("SELECT chunk_id FROM chunks WHERE note_path=?",(path,)))
             for row in rows: self.conn.execute("INSERT OR IGNORE INTO tombstones VALUES (?,?,?,NULL)",(row[0],path,now))
             self.conn.executemany("DELETE FROM chunks_fts WHERE chunk_id=?",rows)
@@ -148,7 +166,7 @@ class Store:
 
     def delete(self,path: str):
         now=_now()
-        with self.conn:
+        with self._write():
             rows=list(self.conn.execute("SELECT chunk_id FROM chunks WHERE note_path=?",(path,)))
             for row in rows: self.conn.execute("INSERT OR IGNORE INTO tombstones VALUES (?,?,?,NULL)",(row[0],path,now))
             self.conn.executemany("DELETE FROM chunks_fts WHERE chunk_id=?",rows)

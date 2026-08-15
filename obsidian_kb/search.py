@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 import sqlite3
 
@@ -12,6 +11,7 @@ from .config import Settings, validate_relative_prefix
 from .indexer import content_exclusion_reason, path_exclusion_reason, source_sha
 from .remote import OllamaClient, QdrantClient, RemoteError
 from .store import CompatibilityError, Store
+from .vault_io import TrustedVault
 
 
 def reciprocal_rank_fusion(lexical:list[dict],semantic:list[dict],limit:int,constant:int=60)->list[dict]:
@@ -31,14 +31,11 @@ def reciprocal_rank_fusion(lexical:list[dict],semantic:list[dict],limit:int,cons
     return output
 
 
-def _fresh(row:dict,vault:Path,settings:Settings)->bool:
+def _fresh(row:dict,vault:TrustedVault,settings:Settings)->bool:
     path=row["note_path"]
     if path_exclusion_reason(path,settings):return False
-    file=vault/path
     try:
-        if file.is_symlink() or not file.is_file() or not file.resolve().is_relative_to(vault.resolve()):return False
-        raw=file.read_bytes()
-        if len(raw)>settings.maximum_note_bytes:return False
+        raw,_=vault.read(path,settings.maximum_note_bytes)
         text=raw.decode("utf-8")
     except (OSError,UnicodeError):return False
     return not content_exclusion_reason(text,settings) and source_sha(raw)==row["source_sha256"]
@@ -49,6 +46,26 @@ def _index_info(store:Store)->dict:
                                   "stale":status["stale"],"pending_vectors":status["pending_vectors"],
                                   "pending_tombstones":status["pending_tombstones"],
                                   "compatibility_signature":status["compatibility_signature"]}
+
+
+def _source_drift(settings:Settings,store:Store)->int:
+    live:dict[str,str]={}
+    with TrustedVault(settings.vault) as vault:
+        for path in vault.markdown_paths(settings.fallback_max_files):
+            if path_exclusion_reason(path,settings):continue
+            try:raw,_=vault.read(path,settings.maximum_note_bytes);text=raw.decode("utf-8")
+            except (OSError,UnicodeError):continue
+            if not content_exclusion_reason(text,settings):live[path]=source_sha(raw)
+    indexed={row["path"]:row["source_sha256"] for row in store.conn.execute("SELECT path,source_sha256 FROM notes WHERE status='active'")}
+    return len(set(live)^set(indexed))+sum(live[path]!=indexed[path] for path in set(live)&set(indexed))
+
+
+def status_with_freshness(settings:Settings)->dict:
+    store=Store(settings.state,settings=settings,read_only=True)
+    try:
+        status=store.status();drift=_source_drift(settings,store)
+        return {**status,"source_drift_count":drift,"stale":bool(status["stale"] or drift)}
+    finally:store.close()
 
 
 def _result(row:dict,rank:int)->dict:
@@ -67,26 +84,22 @@ def _result(row:dict,rank:int)->dict:
 def _filesystem_fallback(settings:Settings,question:str,limit:int,path_prefix:str|None,reason:str)->dict:
     terms=[x.casefold() for x in re.findall(r"[\w-]+",question,flags=re.UNICODE)]
     ranked=[];scanned=0
-    for file in sorted(settings.vault.rglob("*.md")):
-        if scanned>=settings.fallback_max_files:break
-        try:path=file.relative_to(settings.vault).as_posix()
-        except ValueError:continue
-        if path_prefix and not (path==path_prefix or path.startswith(path_prefix+"/")):continue
-        if path_exclusion_reason(path,settings):continue
-        try:
-            if file.is_symlink() or not file.is_file() or not file.resolve().is_relative_to(settings.vault.resolve()):continue
-            raw=file.read_bytes();scanned+=1
-            if len(raw)>settings.maximum_note_bytes:continue
-            text=raw.decode("utf-8")
-        except (OSError,UnicodeError):continue
-        if content_exclusion_reason(text,settings):continue
-        for chunk in chunk_markdown(text,source_sha(raw),path,max_lines=settings.max_lines,max_chars=settings.max_chars,corpus_id=settings.corpus_id):
-            normalized=chunk["content"].casefold();hits=sum(normalized.count(term) for term in terms)
-            if hits:
-                row={"chunk_id":chunk["chunk_id"],"note_path":path,"start_line":chunk["start_line"],"end_line":chunk["end_line"],
-                     "title":chunk["title"],"heading_path":chunk["heading_path"],"snippet":chunk["snippet"],"modes":["fallback"],
-                     "fusion_score":round(min(1.0,hits/max(1,len(terms))),6),"semantic_rank":None,"lexical_rank":None}
-                ranked.append((-hits,path,chunk["start_line"],chunk["chunk_id"],row))
+    with TrustedVault(settings.vault) as vault:
+        for path in vault.markdown_paths(settings.fallback_max_files):
+            if scanned>=settings.fallback_max_files:break
+            if path_prefix and not (path==path_prefix or path.startswith(path_prefix+"/")):continue
+            if path_exclusion_reason(path,settings):continue
+            try:raw,_=vault.read(path,settings.maximum_note_bytes);scanned+=1;text=raw.decode("utf-8")
+            except (OSError,UnicodeError):continue
+            if content_exclusion_reason(text,settings):continue
+            for chunk in chunk_markdown(text,source_sha(raw),path,max_lines=settings.max_lines,max_chars=settings.max_chars,
+                                        overlap_lines=settings.overlap_lines,corpus_id=settings.corpus_id):
+                normalized=chunk["content"].casefold();hits=sum(normalized.count(term) for term in terms)
+                if hits:
+                    row={"chunk_id":chunk["chunk_id"],"note_path":path,"start_line":chunk["start_line"],"end_line":chunk["end_line"],
+                         "title":chunk["title"],"heading_path":chunk["heading_path"],"snippet":chunk["snippet"],"modes":["fallback"],
+                         "fusion_score":round(min(1.0,hits/max(1,len(terms))),6),"semantic_rank":None,"lexical_rank":None}
+                    ranked.append((-hits,path,chunk["start_line"],chunk["chunk_id"],row))
     rows=[x[-1] for x in sorted(ranked)[:limit]]
     results=[]
     for rank,row in enumerate(rows,1):
@@ -114,22 +127,24 @@ def search(settings:Settings,question:str,*,limit:int=5,offline:bool=False,path_
         return _filesystem_fallback(settings,question,limit,prefix,f"SQLite unavailable ({type(exc).__name__}); bounded filesystem fallback used")
     reasons=[]
     try:
-        lexical=[row for row in store.lexical(question,limit*4,prefix) if _fresh(row,settings.vault,settings)]
+        with TrustedVault(settings.vault) as trusted:
+            lexical=[row for row in store.lexical(question,limit*4,prefix) if _fresh(row,trusted,settings)]
         semantic=[]
         if not offline and settings.ollama_url and settings.qdrant_url:
             embedder=ollama or OllamaClient(settings.ollama_url,settings.ollama_model,min(settings.timeout,5.0))
-            vector_db=qdrant or QdrantClient(settings.qdrant_url,settings.qdrant_collection,settings.vector_size,min(settings.timeout,5.0))
+            vector_db=qdrant or QdrantClient(settings.qdrant_url,settings.qdrant_collection,settings.vector_size,min(settings.timeout,5.0),settings.response_max_bytes)
             try:
                 vector=embedder.embed([question])[0]
                 if len(vector)!=settings.vector_size:raise RemoteError("query embedding vector size mismatch")
-                points=vector_db.query(vector,limit*4,settings.corpus_id)
+                points=vector_db.query(vector,limit*4,settings.corpus_id,settings.compatibility_signature())
                 identifiers=[str(p.get("payload",{}).get("chunk_id","")) for p in points]
                 allowed=store.active_semantic([x for x in identifiers if x],prefix)
-                semantic=[allowed[x] for x in identifiers if x in allowed and _fresh(allowed[x],settings.vault,settings)]
+                with TrustedVault(settings.vault) as trusted:
+                    semantic=[allowed[x] for x in identifiers if x in allowed and _fresh(allowed[x],trusted,settings)]
             except (RemoteError,IndexError):reasons.append("semantic retrieval unavailable; lexical-only results returned")
         else:reasons.append("semantic retrieval disabled or not configured; lexical-only results returned")
         rows=reciprocal_rank_fusion(lexical,semantic,limit);results=[_result(row,i) for i,row in enumerate(rows,1)]
-        info=_index_info(store)
+        info=_index_info(store);drift=_source_drift(settings,store);info["source_drift_count"]=drift;info["stale"]=bool(info["stale"] or drift)
         if info["pending_vectors"]:reasons.append("semantic projection is pending")
         mode="hybrid" if semantic else "lexical"
         return {"ok":True,"schema_version":"1.0","query":question,"mode":mode,"degraded":bool(reasons),

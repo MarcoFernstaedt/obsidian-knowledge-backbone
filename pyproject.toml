@@ -12,11 +12,14 @@ keywords = ["obsidian", "sqlite", "fts5", "qdrant", "ollama", "hermes"]
 [project.scripts]
 obsidian-kb = "obsidian_kb.cli:main"
 imperator-knowledge = "obsidian_kb.cli:main"
-imperator-search = "obsidian_kb.cli:main"
-imperator-vault-index = "obsidian_kb.cli:main"
+imperator-search = "obsidian_kb.cli:imperator_search_main"
+imperator-vault-index = "obsidian_kb.cli:imperator_vault_index_main"
+
+[project.entry-points."hermes_agent.plugins"]
+obsidian-retrieval = "hermes_plugin"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
