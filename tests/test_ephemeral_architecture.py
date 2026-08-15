@@ -1,4 +1,5 @@
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -6,8 +7,10 @@ from pathlib import Path
 import socket
 import sqlite3
 import stat
+import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest.mock import patch
 import urllib.request
@@ -31,6 +34,26 @@ def snapshot(root: Path) -> dict[str, tuple[str, int, bytes]]:
         elif path.is_file():
             result[relative] = ("file", path.stat().st_mode, path.read_bytes())
     return result
+
+
+def simple_manifest(path: Path) -> dict[str, object]:
+    """Parse the scalar/list subset used by the dependency-free test manifest."""
+    manifest: dict[str, object] = {}
+    current_list: list[str] | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if raw_line.startswith("  - ") and current_list is not None:
+            current_list.append(raw_line[4:])
+            continue
+        key, separator, value = raw_line.partition(":")
+        if not separator:
+            raise AssertionError(f"invalid manifest line: {raw_line!r}")
+        if value.strip():
+            manifest[key] = value.strip()
+            current_list = None
+        else:
+            current_list = []
+            manifest[key] = current_list
+    return manifest
 
 
 class EphemeralArchitectureTests(unittest.TestCase):
@@ -423,6 +446,73 @@ class EphemeralArchitectureTests(unittest.TestCase):
                          ["obsidian_knowledge_search", "obsidian_knowledge_status"])
         self.assertEqual([command[0][0] for command in context.commands], ["notesearch"])
         self.assertFalse(json.loads(hermes_plugin.obsidian_knowledge_search({"query": "x", "config_path": "x"}))["ok"])
+
+    def test_root_plugin_package_loads_with_matching_manifest(self):
+        root = Path(__file__).parents[1]
+        root_manifest = root / "plugin.yaml"
+        nested_manifest = root / "hermes_plugin" / "plugin.yaml"
+        self.assertTrue(root_manifest.is_file())
+        self.assertEqual(root_manifest.read_bytes(), nested_manifest.read_bytes())
+        self.assertEqual(simple_manifest(root_manifest), {
+            "name": "obsidian-knowledge-backbone",
+            "version": "3.0.0",
+            "description": "Read-only cited retrieval over an approved Obsidian corpus.",
+            "author": "Marco Fernstaedt",
+            "provides_tools": ["obsidian_knowledge_search", "obsidian_knowledge_status"],
+            "provides_commands": ["notesearch"],
+        })
+
+        parent_name = "hermes_plugins_test"
+        module_name = f"{parent_name}.obsidian_knowledge_backbone"
+        parent = types.ModuleType(parent_name)
+        parent.__path__ = []
+        parent.__package__ = parent_name
+        sys.modules[parent_name] = parent
+        original_path = list(sys.path)
+        hidden_modules = {
+            name: module for name, module in tuple(sys.modules.items())
+            if name == "obsidian_kb" or name.startswith("obsidian_kb.")
+        }
+        for hidden_name in hidden_modules:
+            sys.modules.pop(hidden_name)
+        sys.path[:] = [
+            entry for entry in sys.path
+            if Path(entry or os.getcwd()).resolve() != root.resolve()
+        ]
+        try:
+            spec = importlib.util.spec_from_file_location(
+                module_name,
+                root / "__init__.py",
+                submodule_search_locations=[str(root)],
+            )
+            if spec is None or spec.loader is None:
+                self.fail("Hermes-style module specification could not be created")
+            module = importlib.util.module_from_spec(spec)
+            module.__package__ = module_name
+            module.__path__ = [str(root)]
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+
+            class Context:
+                def __init__(self):
+                    self.tools, self.commands, self.skills = [], [], []
+                def register_tool(self, **kwargs): self.tools.append(kwargs)
+                def register_command(self, *args, **kwargs): self.commands.append((args, kwargs))
+                def register_skill(self, *args): self.skills.append(args)
+
+            context = Context()
+            module.register(context)
+            self.assertEqual([tool["name"] for tool in context.tools],
+                             ["obsidian_knowledge_search", "obsidian_knowledge_status"])
+            self.assertEqual([command[0][0] for command in context.commands], ["notesearch"])
+        finally:
+            sys.path[:] = original_path
+            for loaded_name in tuple(sys.modules):
+                if loaded_name == parent_name or loaded_name.startswith(f"{parent_name}."):
+                    sys.modules.pop(loaded_name, None)
+                elif loaded_name == "obsidian_kb" or loaded_name.startswith("obsidian_kb."):
+                    sys.modules.pop(loaded_name, None)
+            sys.modules.update(hidden_modules)
 
     def test_repository_quality_fixture_reaches_acceptance_threshold(self):
         fixture_path = Path(__file__).parent / "fixtures" / "retrieval_quality.json"

@@ -6,10 +6,16 @@ import os
 import shlex
 from pathlib import Path
 
-from obsidian_kb.config import load_settings, validate_relative_prefix
-from obsidian_kb.search import search
-from obsidian_kb.corpus import live_status
-from obsidian_kb.rendering import sanitize_human
+if "." in (__package__ or ""):
+    from ..obsidian_kb.config import load_settings, validate_relative_prefix
+    from ..obsidian_kb.corpus import live_status
+    from ..obsidian_kb.rendering import sanitize_human
+    from ..obsidian_kb.search import search
+else:
+    from obsidian_kb.config import load_settings, validate_relative_prefix
+    from obsidian_kb.corpus import live_status
+    from obsidian_kb.rendering import sanitize_human
+    from obsidian_kb.search import search
 
 CONFIG_ENV = "OBSIDIAN_KB_CONFIG"
 SEARCH_SCHEMA = {"name": "obsidian_knowledge_search",
