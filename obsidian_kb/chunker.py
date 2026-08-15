@@ -1,102 +1,104 @@
+"""Heading-aware Markdown chunking with exact source line spans."""
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+import hashlib
 import re
-from typing import List, Dict, Any, Optional, Tuple
 
-CHUNK_MIN_LINES = 3
-CHUNK_MAX_LINES = 60
+HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 
-class MarkdownChunk:
-    def __init__(self, heading_path: List[str], start_line: int, end_line: int, lines: List[str]):
-        self.heading_path = list(heading_path)
-        self.start_line = start_line
-        self.end_line = end_line
-        self.lines = list(lines)
-        self.content = "".join(lines).strip()
 
-    def as_dict(self, file_sha256: str, file_path: str) -> Dict[str, Any]:
-        return {
-            "heading_path": self.heading_path,
-            "start_line": self.start_line,
-            "end_line": self.end_line,
-            "content": self.content,
-            "file_sha256": file_sha256,
-            "file_path": file_path,
-            "snippet": self.content[:240],
-        }
+@dataclass(frozen=True)
+class Chunk:
+    chunk_id: str
+    file_path: str
+    title: str
+    heading_path: tuple[str, ...]
+    start_line: int
+    end_line: int
+    content: str
+    snippet: str
+    source_sha256: str
 
-def parse_frontmatter(frontmatter_str: str) -> Dict[str, Any]:
-    result = {}
-    for line in frontmatter_str.splitlines():
-        if ':' not in line:
-            continue
-        k, v = line.split(':', 1)
-        result[k.strip().lower()] = v.strip().lower()
-    return result
+    def as_dict(self) -> dict:
+        value = asdict(self)
+        value["heading_path"] = list(self.heading_path)
+        return value
 
-def heading_chunks_md(lines: List[str]) -> List[Tuple[List[str], int, int]]:
-    headings = []
-    cur_path = []
-    starts = [0]
-    chunks = []
-    line_heads = []
-    # Hierarchical heading path stack
-    for i, line in enumerate(lines):
-        hit = re.match(r'^(#{1,6}) (.*)', line)
-        if hit:
-            while len(cur_path) >= len(hit.group(1)):
-                cur_path.pop()
-            cur_path.append(hit.group(2).strip())
-            headings.append((list(cur_path), i))
-            line_heads.append(i)
-    # Build [start,end) spans between headings
-    for idx, (path, start) in enumerate(headings):
-        if idx + 1 < len(headings):
-            end = headings[idx + 1][1]
+
+def frontmatter(text: str) -> tuple[dict[str, str], int]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, 0
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            values: dict[str, str] = {}
+            for line in lines[1:index]:
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    values[key.strip().lower()] = value.strip().lower().strip("'\"")
+            return values, index + 1
+    return {}, 0
+
+
+def is_frontmatter_excluded(text: str, keys: tuple[str, ...]) -> bool:
+    values, _ = frontmatter(text)
+    return any(values.get(key.lower()) in {"false", "no", "0", "off"} for key in keys)
+
+
+def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int):
+    current: list[tuple[int, str]] = []
+    size = 0
+    for line_number, line in parts:
+        segments = [line[i:i + max_chars] for i in range(0, len(line), max_chars)] or [""]
+        for segment in segments:
+            extra = len(segment) + (1 if current else 0)
+            if current and (len(current) >= max_lines or size + extra > max_chars):
+                yield current
+                current, size = [], 0
+            current.append((line_number, segment))
+            size += len(segment) + (1 if len(current) > 1 else 0)
+    if current:
+        yield current
+
+
+def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: int = 60,
+                   max_chars: int = 6000) -> list[dict]:
+    lines = text.splitlines()
+    _, body_offset = frontmatter(text)
+    stack: list[str] = []
+    sections: list[tuple[tuple[str, ...], list[tuple[int, str]]]] = []
+    current_path: tuple[str, ...] = ()
+    current: list[tuple[int, str]] = []
+    title = ""
+    fenced = False
+    for index in range(body_offset, len(lines)):
+        line = lines[index]
+        match = None if fenced else HEADING.match(line)
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        if match:
+            if current:
+                sections.append((current_path, current))
+            level, heading = len(match.group(1)), match.group(2).strip()
+            stack[level - 1:] = [heading]
+            current_path = tuple(stack)
+            title = title or heading
+            current = [(index + 1, line)]
         else:
-            end = len(lines)
-        chunks.append((path, start, end))
-    # Prepend non-heading content at start if any
-    if line_heads and line_heads[0] > 0:
-        chunks = [([], 0, line_heads[0])] + chunks
-    if not headings:
-        chunks = [([], 0, len(lines))]
-    return chunks
-
-def chunk_markdown(
-    md_text: str,
-    file_sha256: str,
-    file_path: str,
-    respect_frontmatter: bool = True,
-    chunk_min_lines: int = CHUNK_MIN_LINES,
-    chunk_max_lines: int = CHUNK_MAX_LINES,
-) -> List[Dict[str, Any]]:
-    """Chunk Markdown into heading-aware units, tracking line spans and exclusions."""
-    lines = md_text.splitlines()
-    # Frontmatter exclusion
-    exclude = False
-    if respect_frontmatter and lines and lines[0].strip() == '---':
-        fm_end = 1
-        while fm_end < len(lines) and lines[fm_end].strip() != '---':
-            fm_end += 1
-        frontmatter_text = '\n'.join(lines[1:fm_end])
-        fm = parse_frontmatter(frontmatter_text)
-        exclude = fm.get('semantic_index', 'true') == 'false' or fm.get('index', 'true') == 'false'
-        if exclude:
-            return []
-        body_lines = lines[fm_end+1:]
-    else:
-        body_lines = lines
-    # Chunk by headings
-    chunks = []
-    for head_path, start, end in heading_chunks_md(body_lines):
-        chunk_lines = body_lines[start:end]
-        # Further split oversized chunks
-        i = 0
-        while i < len(chunk_lines):
-            sub_end = min(i+chunk_max_lines, len(chunk_lines))
-            sub_lines = chunk_lines[i:sub_end]
-            if len(sub_lines) >= chunk_min_lines:
-                chunks.append(MarkdownChunk(head_path, start+i+1, start+sub_end, sub_lines).as_dict(
-                    file_sha256, file_path
-                ))
-            i = sub_end
+            current.append((index + 1, line))
+    if current:
+        sections.append((current_path, current))
+    chunks: list[dict] = []
+    for heading_path, section in sections:
+        if not any(line.strip() and not HEADING.match(line) for _, line in section):
+            continue
+        for part in _bounded(section, max_lines, max_chars):
+            content = "\n".join(line for _, line in part).strip()
+            if not content:
+                continue
+            start, end = part[0][0], part[-1][0]
+            digest = hashlib.sha256(f"{file_path}\0{start}\0{end}\0{content}".encode()).hexdigest()
+            chunks.append(Chunk(digest, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+                                heading_path, start, end, content, content[:320], source_sha256).as_dict())
     return chunks

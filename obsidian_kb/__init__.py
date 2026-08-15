@@ -1,1 +1,3 @@
-"""obsidian_kb: Knowledge backbone engine package."""
+"""Obsidian Knowledge Backbone."""
+
+__version__ = "1.0.0"

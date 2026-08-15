@@ -1,28 +1,23 @@
-# obsidian-kb example configuration
-
 [vault]
-# Path to the Obsidian vault root
-path = "/example/vault"
+path = "/path/to/your/Obsidian-vault"
 
 [state]
-# SQLite state file for FTS5 index
-sqlite_path = "index.sqlite"
-
-# Directory for logs, audit state, exclusions
-log_dir = "logs"
-
-[qdrant]
-url = "http://localhost:6333"
-collection = "obsidian_kb_notes"
-model = "nomic-embed-text"
+sqlite_path = "/path/to/operator-state/obsidian-kb.sqlite3"
 
 [exclusions]
-# Directory and glob patterns to exclude (relative to vault)
-folders = [ ".git", ".obsidian", ".trash", "templates" ]
-globs = [ "*secret*", "*private*" ]
+folders = [".git", ".obsidian", ".trash", "Templates"]
+globs = ["Private/**", "**/*.private.md"]
+frontmatter_false_keys = ["index", "semantic_index", "knowledge_index"]
+secret_patterns = []
 
-# Exclude any file containing these secret patterns (case-insensitive regex)
-secret_patterns = [ "PRIVATE KEY", "API[_-]?KEY", "SECRET", "PASSWORD", "BEGIN [A-Z ]*PRIVATE KEY", "aws_access_key_id", "aws_secret_access_key" ]
+[chunking]
+max_lines = 60
+max_chars = 6000
 
-# Do not index sections with 'semantic_index: false' in frontmatter
-
+[semantic]
+ollama_url = "http://127.0.0.1:11434"
+ollama_model = "nomic-embed-text"
+qdrant_url = "http://127.0.0.1:6333"
+collection = "obsidian_knowledge"
+vector_size = 768
+timeout = 10.0
