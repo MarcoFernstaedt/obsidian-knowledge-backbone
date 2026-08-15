@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">Obsidian Knowledge Backbone architecture</title>
+  <desc id="description">A private configuration selects an approved read-only Markdown vault. Safe bounded traversal creates a complete point-in-time corpus. Heading-aware chunks enter an in-memory SQLite FTS5 database. Ranked results with exact citations leave through the CLI, Python, or Hermes, and the database closes.</desc>
+  <defs>
+    <style>
+      .background { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #334155; stroke-width: 2; }
+      .secure { fill: #ecfdf5; stroke: #047857; stroke-width: 2; }
+      .memory { fill: #eff6ff; stroke: #1d4ed8; stroke-width: 2; }
+      .output { fill: #fff7ed; stroke: #c2410c; stroke-width: 2; }
+      .title { fill: #0f172a; font: 700 26px system-ui, sans-serif; }
+      .label { fill: #0f172a; font: 700 18px system-ui, sans-serif; }
+      .body { fill: #334155; font: 15px system-ui, sans-serif; }
+      .small { fill: #475569; font: 14px system-ui, sans-serif; }
+      .arrow { fill: none; stroke: #475569; stroke-width: 3; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <rect class="background" width="1200" height="620" rx="20"/>
+  <text class="title" x="60" y="58">Private, point-in-time citation search</text>
+  <text class="small" x="60" y="86">The complete corpus exists before SQLite opens; no partial corpus is queryable.</text>
+
+  <rect class="secure" x="60" y="130" width="250" height="145" rx="14"/>
+  <text class="label" x="85" y="168">Private authority</text>
+  <text class="body" x="85" y="201">0600 fixed config</text>
+  <text class="body" x="85" y="227">Approved Markdown vault</text>
+  <text class="body" x="85" y="253">Read-only; no network</text>
+
+  <path class="arrow" d="M310 202 H375"/>
+
+  <rect class="panel" x="390" y="130" width="250" height="145" rx="14"/>
+  <text class="label" x="415" y="168">Safe bounded scan</text>
+  <text class="body" x="415" y="201">No-follow traversal</text>
+  <text class="body" x="415" y="227">Privacy and resource policy</text>
+  <text class="body" x="415" y="253">Drift checks; fail closed</text>
+
+  <path class="arrow" d="M640 202 H705"/>
+
+  <rect class="panel" x="720" y="130" width="250" height="145" rx="14"/>
+  <text class="label" x="745" y="168">Complete corpus</text>
+  <text class="body" x="745" y="201">Heading-aware chunks</text>
+  <text class="body" x="745" y="227">Exact inclusive line spans</text>
+  <text class="body" x="745" y="253">Point-in-time consistency</text>
+
+  <path class="arrow" d="M845 275 V343"/>
+
+  <rect class="memory" x="720" y="360" width="250" height="145" rx="14"/>
+  <text class="label" x="745" y="398">SQLite FTS5 :memory:</text>
+  <text class="body" x="745" y="431">Weighted BM25 ranking</text>
+  <text class="body" x="745" y="457">Exact lexical tokens</text>
+  <text class="body" x="745" y="483">Connection closes</text>
+
+  <path class="arrow" d="M720 432 H655"/>
+
+  <rect class="output" x="390" y="360" width="250" height="145" rx="14"/>
+  <text class="label" x="415" y="398">Cited results</text>
+  <text class="body" x="415" y="431">Path and lines</text>
+  <text class="body" x="415" y="457">Heading, snippet, link</text>
+  <text class="body" x="415" y="483">Untrusted source label</text>
+
+  <path class="arrow" d="M390 432 H325"/>
+
+  <rect class="panel" x="60" y="360" width="250" height="145" rx="14"/>
+  <text class="label" x="85" y="398">Authorized interfaces</text>
+  <text class="body" x="85" y="431">CLI</text>
+  <text class="body" x="85" y="457">Python</text>
+  <text class="body" x="85" y="483">Hermes tools and command</text>
+
+  <text class="small" x="60" y="565">Durable search/index artifacts: none. Mutable vault after the final check: possible, so every success reports current=false.</text>
+</svg>

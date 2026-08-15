@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title description">
+  <title id="title">Synthetic command-line status and search demonstration</title>
+  <desc id="description">A terminal shows obsidian-kb status reporting one eligible note, one excluded note, and a complete point-in-time scan. A search for deployment rollback returns Runbooks/Recovery.md lines 3 through 4 and labels the passage as untrusted quoted source.</desc>
+  <defs>
+    <style>
+      .frame { fill: #0b1220; stroke: #334155; stroke-width: 2; }
+      .bar { fill: #172033; }
+      .dot-red { fill: #fb7185; }
+      .dot-yellow { fill: #fbbf24; }
+      .dot-green { fill: #34d399; }
+      .caption { fill: #cbd5e1; font: 15px system-ui, sans-serif; }
+      .prompt { fill: #86efac; font: 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .text { fill: #e2e8f0; font: 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .key { fill: #93c5fd; font: 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .warning { fill: #fde68a; font: 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="660" fill="#f8fafc" rx="20"/>
+  <rect class="frame" x="35" y="35" width="1130" height="590" rx="16"/>
+  <path class="bar" d="M51 35 H1149 A16 16 0 0 1 1165 51 V88 H35 V51 A16 16 0 0 1 51 35 Z"/>
+  <circle class="dot-red" cx="67" cy="62" r="8"/>
+  <circle class="dot-yellow" cx="94" cy="62" r="8"/>
+  <circle class="dot-green" cx="121" cy="62" r="8"/>
+  <text class="caption" x="600" y="68" text-anchor="middle">disposable synthetic vault — no private data</text>
+
+  <text class="prompt" x="65" y="125">$ obsidian-kb status</text>
+  <text class="key" x="65" y="160">ephemeral:</text><text class="text" x="205" y="160">True</text>
+  <text class="key" x="65" y="190">persistence:</text><text class="text" x="205" y="190">False</text>
+  <text class="key" x="65" y="220">eligible_notes:</text><text class="text" x="235" y="220">1</text>
+  <text class="key" x="65" y="250">excluded_notes:</text><text class="text" x="235" y="250">1</text>
+  <text class="key" x="65" y="280">chunks:</text><text class="text" x="155" y="280">1</text>
+  <text class="key" x="65" y="310">source_inventory_complete:</text><text class="text" x="375" y="310">True</text>
+  <text class="key" x="65" y="340">snapshot_consistent:</text><text class="text" x="310" y="340">True</text>
+  <text class="key" x="65" y="370">current:</text><text class="text" x="165" y="370">False</text>
+  <text class="key" x="65" y="400">freshness:</text><text class="text" x="185" y="400">point-in-time</text>
+
+  <text class="prompt" x="65" y="455">$ obsidian-kb search --limit 1 "deployment rollback"</text>
+  <text class="text" x="65" y="493">Runbooks/Recovery.md:L3-L4 | Recovery runbook |</text>
+  <text class="text" x="65" y="523">Recovery runbook &gt; Rollback procedure | lexical | 0.00000283</text>
+  <text class="warning" x="65" y="565">UNTRUSTED QUOTED SOURCE: ## Rollback procedure\u000aPause deployment</text>
+  <text class="warning" x="65" y="595">traffic, restore the last known good release, then verify service health.</text>
+</svg>

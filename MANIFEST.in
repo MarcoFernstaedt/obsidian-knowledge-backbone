@@ -2,5 +2,5 @@ include __init__.py
 include config.example.toml
 include plugin.yaml
 include SECURITY.md
-recursive-include docs *.md
+recursive-include docs *.md *.svg
 recursive-include hermes_plugin *.yaml *.md

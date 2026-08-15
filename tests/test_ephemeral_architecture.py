@@ -412,17 +412,18 @@ class EphemeralArchitectureTests(unittest.TestCase):
         with self.assertRaises(CorpusLimitError):
             search(Settings(self.vault, max_lines=1, max_chars=64, maximum_chunks=1), "large")
 
-    def test_shipped_surfaces_retire_mutable_and_remote_architecture(self):
+    def test_shipped_surfaces_retire_mutable_and_remote_architecture_but_allow_public_links(self):
         root = Path(__file__).parents[1]
-        shipped = [root / "obsidian_kb", root / "hermes_plugin", root / "docs",
-                   root / "README.md", root / "SECURITY.md", root / "config.example.toml",
-                   root / "pyproject.toml", root / "MANIFEST.in", root / ".github"]
-        forbidden = ("state_io", "trustedstatedirectory", "journal_mode", "-wal", "-shm",
-                     "ollama", "qdrant", "semantic", "vector", "http://", "https://",
-                     "urllib", "imperator_obsidian_retrieval_refresh")
+        runtime = [root / "obsidian_kb", root / "hermes_plugin", root / "config.example.toml",
+                   root / "pyproject.toml", root / "MANIFEST.in"]
+        documentation = [root / "docs", root / "README.md", root / "SECURITY.md", root / ".github"]
+        retired = ("state_io", "trustedstatedirectory", "journal_mode", "-wal", "-shm",
+                   "ollama", "qdrant", "semantic", "vector",
+                   "imperator_obsidian_retrieval_refresh")
         hits = []
-        for item in shipped:
+        for item in runtime + documentation:
             paths = [item] if item.is_file() else list(item.rglob("*"))
+            forbidden = retired + (("http://", "https://", "urllib") if item in runtime else ())
             for path in paths:
                 if not path.is_file() or "__pycache__" in path.parts:
                     continue
