@@ -1,0 +1,21 @@
+# Obsidian Knowledge Backbone ignores
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.cache/
+dist/
+build/
+.eggs/
+*.egg-info/
+/.pytest_cache/
+/.mypy_cache/
+*.sqlite3
+*.db
+*.log
+# State and test output
+index.db
+index.sqlite
+*.state.json
+/secrets/
+/tests/vault/**

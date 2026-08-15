@@ -1,0 +1,23 @@
+[project]
+name = "obsidian-kb"
+version = "0.1.0"
+description = "Hybrid privacy-aware heading-granular search and plugin for Obsidian vaults"
+authors = ["Marco Fernstaedt <93682778+MarcoFernstaedt@users.noreply.github.com>"]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "click >=8.1.7",
+    "sqlite-utils >=3.36.0",
+]
+keywords = ["obsidian", "search", "Qdrant", "FTS5", "privacy", "hybrid", "vault", "hermes-plugin"]
+
+[tool.setuptools]
+packages = ["obsidian_kb", "hermes_plugin"]
+
+[project.scripts]
+obsidian-kb = "obsidian_kb.cli:main"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
