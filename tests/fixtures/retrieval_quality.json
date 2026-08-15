@@ -1,0 +1,36 @@
+{
+  "notes": {
+    "runbooks/deployment.md": "# Deployment rollback runbook\nCanary release rollback procedure with health checks and safe service restoration.\n",
+    "data/postgresql.md": "# PostgreSQL backup recovery\nRestore a PostgreSQL database from a verified backup and validate transaction integrity.\n",
+    "communications/twilio.md": "# Twilio voice and SMS setup\nSelect a phone number with Voice and SMS capabilities and configure inbound calling.\n",
+    "network/tailscale.md": "# Tailscale private access\nPublish a private tailnet service with least privilege ACL rules and device authentication.\n",
+    "operations/incidents.md": "# Incident response triage\nClassify severity, preserve evidence, assign an incident commander, and communicate status.\n",
+    "accessibility/review.md": "# Screen reader keyboard review\nVerify focus order, accessible names, live regions, reflow, and keyboard-only navigation.\n",
+    "finance/billing.md": "# Recurring billing verification\nConfirm the next automatic payment date, amount, customer, and subscription status.\n",
+    "engineering/git.md": "# Git branch integration\nFetch the owner remote, verify ancestry, merge without force, and confirm the server ref.\n",
+    "agents/hermes.md": "# Hermes plugin tools\nRegister bounded plugin tools and commands with fixed private configuration and safe errors.\n",
+    "knowledge/obsidian.md": "# Obsidian citation retrieval\nSearch curated Markdown notes and return exact path and inclusive source line citations.\n"
+  },
+  "queries": [
+    ["canary deployment rollback", "runbooks/deployment.md"],
+    ["safe service restoration", "runbooks/deployment.md"],
+    ["postgresql backup restore", "data/postgresql.md"],
+    ["transaction integrity database", "data/postgresql.md"],
+    ["twilio voice sms number", "communications/twilio.md"],
+    ["inbound phone calling", "communications/twilio.md"],
+    ["tailscale tailnet acl", "network/tailscale.md"],
+    ["private device authentication", "network/tailscale.md"],
+    ["incident commander severity", "operations/incidents.md"],
+    ["preserve evidence triage", "operations/incidents.md"],
+    ["screen reader keyboard", "accessibility/review.md"],
+    ["focus order live regions", "accessibility/review.md"],
+    ["recurring billing payment", "finance/billing.md"],
+    ["subscription amount date", "finance/billing.md"],
+    ["git branch ancestry", "engineering/git.md"],
+    ["owner remote server ref", "engineering/git.md"],
+    ["hermes plugin tools", "agents/hermes.md"],
+    ["fixed private configuration", "agents/hermes.md"],
+    ["obsidian citation retrieval", "knowledge/obsidian.md"],
+    ["inclusive source line citations", "knowledge/obsidian.md"]
+  ]
+}

@@ -1,4 +1,4 @@
-"""Strict local TOML configuration for the knowledge backbone."""
+"""Strict fixed TOML configuration for read-only live vault retrieval."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,13 +11,12 @@ import tomllib
 
 
 class ConfigError(ValueError):
-    """Raised when configuration is missing or malformed."""
+    """Raised when configuration is missing, unsafe, or malformed."""
 
 
 @dataclass(frozen=True)
 class Settings:
     vault: Path
-    state: Path
     excluded_folders: tuple[str, ...] = (".git", ".obsidian", ".stfolder", ".trash", "Templates", "node_modules", "__pycache__", "logs", "sessions")
     excluded_globs: tuple[str, ...] = ("**/*session-dump*", "**/*task-queue*", "**/*.excalidraw.md")
     exclude_hidden: bool = True
@@ -27,25 +26,27 @@ class Settings:
     max_chars: int = 1200
     overlap_lines: int = 2
     corpus_id: str = "curated-obsidian"
-    schema_version: int = 4
-    chunker_version: str = "heading-v4"
     maximum_note_bytes: int = 2_097_152
-    fallback_max_files: int = 5_000
-    freshness_max_files: int = 100_000
+    maximum_files: int = 5_000
+    maximum_chunks: int = 50_000
+    maximum_total_bytes: int = 268_435_456
     include_globs: tuple[str, ...] = ("*.md", "**/*.md")
 
-    def compatibility(self) -> dict[str, object]:
-        policy = json.dumps({"include_globs": self.include_globs, "folders": self.excluded_folders,
-                             "globs": self.excluded_globs, "hidden": self.exclude_hidden,
-                             "frontmatter": self.frontmatter_false_keys, "secrets": self.extra_secret_patterns,
-                             "maximum_note_bytes": self.maximum_note_bytes}, sort_keys=True, separators=(",", ":"))
-        return {"schema_version": self.schema_version, "corpus_id": self.corpus_id,
-                "chunker_version": self.chunker_version, "max_lines": self.max_lines,
-                "max_chars": self.max_chars, "overlap_lines": self.overlap_lines,
-                "policy_fingerprint": hashlib.sha256(policy.encode()).hexdigest()}
-
     def compatibility_signature(self) -> str:
-        raw = json.dumps(self.compatibility(), sort_keys=True, separators=(",", ":"))
+        policy = {
+            "corpus": self.corpus_id,
+            "include": self.include_globs,
+            "folders": self.excluded_folders,
+            "globs": self.excluded_globs,
+            "hidden": self.exclude_hidden,
+            "frontmatter": self.frontmatter_false_keys,
+            "secrets": self.extra_secret_patterns,
+            "max_lines": self.max_lines,
+            "max_chars": self.max_chars,
+            "overlap_lines": self.overlap_lines,
+            "maximum_note_bytes": self.maximum_note_bytes,
+        }
+        raw = json.dumps(policy, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -110,41 +111,32 @@ def _load_toml(path: Path, require_private: bool) -> dict:
 
 
 def load_settings(config_path: str | Path | None = None, *, vault: str | Path | None = None,
-                  state: str | Path | None = None, require_private: bool = False) -> Settings:
+                  require_private: bool = False) -> Settings:
     data: dict = {}
     base = Path.cwd()
     if config_path:
         path = Path(config_path)
         base = path.absolute().parent
         data = _load_toml(path, require_private)
-    allowed = {"schema_version", "corpus_id", "vault", "state", "exclusions", "chunking"}
+    allowed = {"schema_version", "corpus_id", "vault", "exclusions", "chunking", "resources"}
     unknown = set(data) - allowed
     if unknown:
         raise ConfigError(f"unknown config section(s): {', '.join(sorted(unknown))}")
-    vault_cfg, state_cfg = _table(data, "vault"), _table(data, "state")
-    exclusions, chunking = _table(data, "exclusions"), _table(data, "chunking")
+    vault_cfg = _table(data, "vault")
+    exclusions = _table(data, "exclusions")
+    chunking = _table(data, "chunking")
+    resources = _table(data, "resources")
     _known(vault_cfg, {"path"}, "vault")
-    _known(state_cfg, {"sqlite_path"}, "state")
     _known(exclusions, {"include_globs", "folders", "globs", "hidden", "frontmatter_false_keys", "secret_patterns"}, "exclusions")
-    _known(chunking, {"max_lines", "max_chars", "overlap_lines", "maximum_note_bytes", "fallback_max_files", "freshness_max_files"}, "chunking")
-    vault_value, state_value = vault or vault_cfg.get("path"), state or state_cfg.get("sqlite_path")
+    _known(chunking, {"max_lines", "max_chars", "overlap_lines", "maximum_note_bytes"}, "chunking")
+    _known(resources, {"maximum_files", "maximum_chunks", "maximum_total_bytes"}, "resources")
+    vault_value = vault or vault_cfg.get("path")
     if not isinstance(vault_value, (str, Path)) or not str(vault_value):
         raise ConfigError("vault.path is required")
-    if not isinstance(state_value, (str, Path)) or not str(state_value):
-        raise ConfigError("state.sqlite_path is required")
-    vault_path, state_path = Path(vault_value).expanduser(), Path(state_value).expanduser()
-    if not vault_path.is_absolute(): vault_path = base / vault_path
-    if not state_path.is_absolute(): state_path = base / state_path
+    vault_path = Path(vault_value).expanduser()
+    if not vault_path.is_absolute():
+        vault_path = base / vault_path
     vault_path = vault_path.resolve()
-    # Preserve the lexical state path so descriptor-relative traversal can reject
-    # symlink ancestors at use time. resolve() is used only for this initial
-    # containment check; it is never trusted as an operation path.
-    state_path = Path(os.path.abspath(state_path))
-    resolved_state = state_path.resolve()
-    lock_path = resolved_state.with_suffix(resolved_state.suffix + ".lock")
-    if (resolved_state == vault_path or resolved_state.is_relative_to(vault_path) or
-            lock_path == vault_path or lock_path.is_relative_to(vault_path)):
-        raise ConfigError("state database and lock must be outside the vault")
     folders = _strings(exclusions.get("folders"), "exclusions.folders") or Settings.excluded_folders
     globs = _strings(exclusions.get("globs"), "exclusions.globs") or Settings.excluded_globs
     includes = _strings(exclusions.get("include_globs"), "exclusions.include_globs") or Settings.include_globs
@@ -154,19 +146,30 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     keys = _strings(exclusions.get("frontmatter_false_keys"), "exclusions.frontmatter_false_keys") or Settings.frontmatter_false_keys
     patterns = _strings(exclusions.get("secret_patterns"), "exclusions.secret_patterns")
     hidden = exclusions.get("hidden", True)
-    if not isinstance(hidden, bool): raise ConfigError("exclusions.hidden must be a boolean")
-    values = {"max_lines": chunking.get("max_lines", 60), "max_chars": chunking.get("max_chars", 1200),
-              "overlap_lines": chunking.get("overlap_lines", 2), "maximum_note_bytes": chunking.get("maximum_note_bytes", 2_097_152),
-              "fallback_max_files": chunking.get("fallback_max_files", 5_000), "freshness_max_files": chunking.get("freshness_max_files", 100_000)}
-    if any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for key, value in values.items() if key != "overlap_lines"):
-        raise ConfigError("chunking limits must be positive integers")
+    if not isinstance(hidden, bool):
+        raise ConfigError("exclusions.hidden must be a boolean")
+    values = {
+        "max_lines": chunking.get("max_lines", 60),
+        "max_chars": chunking.get("max_chars", 1200),
+        "overlap_lines": chunking.get("overlap_lines", 2),
+        "maximum_note_bytes": chunking.get("maximum_note_bytes", 2_097_152),
+        "maximum_files": resources.get("maximum_files", 5_000),
+        "maximum_chunks": resources.get("maximum_chunks", 50_000),
+        "maximum_total_bytes": resources.get("maximum_total_bytes", 268_435_456),
+    }
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 1
+           for key, value in values.items() if key != "overlap_lines"):
+        raise ConfigError("chunking and resource limits must be positive integers")
     if not isinstance(values["overlap_lines"], int) or isinstance(values["overlap_lines"], bool) or not 0 <= values["overlap_lines"] <= 2:
         raise ConfigError("chunking.overlap_lines must be between 0 and 2")
-    if values["max_chars"] < 64: raise ConfigError("chunking.max_chars must be >= 64")
-    if data.get("schema_version", 1) != 1: raise ConfigError("configuration schema_version must be 1")
+    if values["max_chars"] < 64:
+        raise ConfigError("chunking.max_chars must be >= 64")
+    if data.get("schema_version", 1) != 1:
+        raise ConfigError("configuration schema_version must be 1")
     corpus = data.get("corpus_id", "curated-obsidian")
-    if not isinstance(corpus, str) or not corpus.strip(): raise ConfigError("corpus_id must be a non-empty string")
-    return Settings(vault_path, state_path, folders, globs, hidden, keys, patterns,
+    if not isinstance(corpus, str) or not corpus.strip():
+        raise ConfigError("corpus_id must be a non-empty string")
+    return Settings(vault_path, folders, globs, hidden, keys, patterns,
                     values["max_lines"], values["max_chars"], values["overlap_lines"], corpus,
-                    4, "heading-v4", values["maximum_note_bytes"], values["fallback_max_files"],
-                    values["freshness_max_files"], includes)
+                    values["maximum_note_bytes"], values["maximum_files"], values["maximum_chunks"],
+                    values["maximum_total_bytes"], includes)

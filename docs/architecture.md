@@ -1,29 +1,31 @@
 # Architecture
 
-## Authority and privacy
+## Authority
 
-The curated Markdown vault is the content authority and is never written. SQLite is the only derived ledger and retrieval index. Every returned candidate is revalidated against current exact source bytes and the complete eligibility policy. Excluded notes store only relative path and reason. Passages are explicitly untrusted quoted source data.
+The curated Markdown vault is the sole content authority and is never written. Each operation constructs one complete, exact, bounded live corpus. Passages remain untrusted quoted source data.
 
-## Index flow and crash recovery
+## Live corpus flow
 
-1. Validate the fixed private config. At use time, traverse every state-directory ancestor from `/` with descriptor-relative `O_NOFOLLOW`, reject symlink/non-directory ancestors, prove the opened state directory is outside the current vault, and retain its device/inode-bound descriptor.
-2. Acquire a private nonblocking single-writer lock through that descriptor. SQLite and its WAL/SHM names use the same stable `/proc/self/fd` directory and fail closed where that facility is unavailable. Revalidate configured-path identity and vault containment at operation boundaries.
-3. Classify path exclusions before content reads. Traverse with descriptor-relative no-follow opens from one trusted root and reject symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credentials.
-4. Chunk allowed Markdown by headings with exact inclusive source spans and deterministic corpus/signature/path/ordinal UUIDv5 identities.
-5. Commit the complete scan's notes, chunks, FTS rows, removals, generation, and timestamp in one SQLite transaction. Any unknown read or invariant failure rolls the whole scan back.
+1. Validate the fixed private config. Unsupported and unknown sections fail closed.
+2. Open the approved vault root once. Enumerate and read through descriptor-relative no-follow operations.
+3. Apply path rules before content reads, then source-size, UTF-8, bounded frontmatter, explicit opt-out, and credential controls.
+4. Abort the whole operation on unknown/transient traversal or read errors. Deterministic policy exclusions count safely. Abort as incomplete on file, chunk, or total-byte overflow.
+5. Chunk every eligible current note by headings with exact inclusive source spans and deterministic corpus/policy/path/ordinal UUIDv5 identities.
+6. Only after the complete corpus exists, open SQLite with the literal `:memory:` database name, create FTS5, insert all chunks, query, and close it.
 
-SQLite uses WAL, foreign keys, explicit transactions, and a busy timeout. Metadata binds local schema `3`, corpus, all chunk parameters, maximum source size, and a fingerprint of every content-affecting exclusion rule. Drift requires a fresh side-by-side index.
+No source drift protocol is required: source and retrieval are one operation. No partial corpus is queryable.
 
-## Retrieval flow
+## Retrieval
 
-Queries are 1–512 characters and limits are 1–20. Relative `path_prefix` filters are normalized, traversal-safe, and parameterized. FTS5 uses shared non-stemming Unicode lexical tokens plus BM25 with deterministic score, path, line, and chunk-ID ordering. Candidates are paged through a 10,000-row safety bound. Before publication, each result is re-read and re-chunked through the trusted vault descriptor; all citation, content, digest, identity, and FTS projection fields must exactly equal the current source-derived chunk. Corruption or safety-bound exhaustion invokes fallback.
+Queries are 1–512 characters and limits are 1–20. Relative `path_prefix` filters are traversal-safe and parameterized. Query tokens use deterministic case/diacritic folding, no stemming, no prefix matching, and a fixed small stop-word set. Remaining exact tokens are quoted and OR-combined. There is no hidden query expansion.
 
-If SQLite is missing, corrupt, or incompatible, retrieval scans at most the configured filesystem bound in memory and applies the same path, frontmatter, source-size, symlink, race, and credential policy. It writes no state. Status performs a separately bounded complete inventory: overflow or unknown reads report incomplete/stale rather than false-current.
+FTS5 uses `unicode61 remove_diacritics 2`. BM25 field weights are title 8, heading 5, path 3, and content 1. Ordering is score, path, then insertion row. Source-derived chunks directly supply title, heading hierarchy, path, exact line span, snippet, citation, and Obsidian link.
 
 ## Interfaces
 
-- CLI: `imperator-knowledge` index, search/query, status, and audit, plus compatibility entry points.
+- CLI: search/query, status, audit, and compatibility `index`; `index` is a read-only audit.
+- Compatibility console entry points: `imperator-search` and `imperator-vault-index`.
 - Hermes plugin: exactly `obsidian_knowledge_search`, `obsidian_knowledge_status`, and `/notesearch`.
-- Configuration is fixed by `OBSIDIAN_KB_CONFIG`; no caller path or execution-mode override exists.
-- Search reports lexical mode only. Status reports local age, drift, current/stale, compatibility, active/excluded notes, and chunks without note paths.
-- All runtime paths are network-free.
+- Configuration: fixed `OBSIDIAN_KB_CONFIG`; no caller override.
+- Status: eligible/excluded notes, chunks, scan duration, inventory complete/current, and `compatibility=ephemeral-live`; no paths/content.
+- Runtime: no network use and no filesystem writes.

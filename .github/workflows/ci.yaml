@@ -23,8 +23,6 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
       - name: Compile outside repository
         run: PYTHONPYCACHEPREFIX=/tmp/obsidian-kb-pycache python -m compileall -q obsidian_kb hermes_plugin tests
-      - name: Shell syntax
-        run: bash -n scripts/imperator_obsidian_retrieval_refresh.sh
       - name: Build and isolated entry-point smokes
         run: |
           python -m pip install --disable-pip-version-check 'build==1.5.0'

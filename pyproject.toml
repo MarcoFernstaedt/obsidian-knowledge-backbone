@@ -1,13 +1,13 @@
 [project]
 name = "obsidian-knowledge-backbone"
-version = "2.0.0"
-description = "Private network-free SQLite FTS citation search for curated Obsidian vaults"
+version = "3.0.0"
+description = "Private read-only ephemeral FTS5 citation search for curated Obsidian vaults"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Marco Fernstaedt"}]
 dependencies = []
-keywords = ["obsidian", "sqlite", "fts5", "lexical", "hermes"]
+keywords = ["obsidian", "sqlite", "fts5", "lexical", "hermes", "ephemeral"]
 
 [project.scripts]
 obsidian-kb = "obsidian_kb.cli:main"

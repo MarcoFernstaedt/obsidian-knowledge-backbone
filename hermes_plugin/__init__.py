@@ -7,7 +7,8 @@ import shlex
 from pathlib import Path
 
 from obsidian_kb.config import load_settings, validate_relative_prefix
-from obsidian_kb.search import search, status_with_freshness
+from obsidian_kb.search import search
+from obsidian_kb.corpus import live_status
 from obsidian_kb.rendering import sanitize_human
 
 CONFIG_ENV = "OBSIDIAN_KB_CONFIG"
@@ -19,7 +20,7 @@ SEARCH_SCHEMA = {"name": "obsidian_knowledge_search",
    "path_prefix": {"type": ["string", "null"], "description": "Optional safe relative vault path prefix."}},
   "required": ["query"], "additionalProperties": False}}
 STATUS_SCHEMA = {"name": "obsidian_knowledge_status",
- "description": "Read-only local index age, source drift, compatibility, current state, and safe counts. No note paths or content.",
+ "description": "Read-only live eligible/excluded note and chunk counts from a complete ephemeral scan. No note paths or content.",
  "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}
 
 
@@ -44,7 +45,7 @@ def obsidian_knowledge_search(args: dict, **_kwargs) -> str:
 def obsidian_knowledge_status(args: dict | None = None, **_kwargs) -> str:
     try:
         if args not in (None, {}): raise ValueError("status accepts no arguments")
-        payload = {"ok": True, "index": status_with_freshness(_settings())}
+        payload = {"ok": True, "index": live_status(_settings())}
     except Exception as exc: payload = {"ok": False, "error": f"knowledge status failed: {type(exc).__name__}"}
     return json.dumps(payload, sort_keys=True)
 

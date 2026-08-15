@@ -1,39 +1,25 @@
 # Obsidian Knowledge Backbone
 
-A private, network-free citation index for curated Markdown vaults. It reads the vault without writing it, atomically publishes a local SQLite FTS5 index, deterministically ranks lexical matches, and returns current exact path/line citations. The Python 3.11+ runtime has no third-party dependencies.
+Private, network-free citation search for curated Markdown vaults. Every operation scans the approved vault through descriptor-safe read-only access, applies the complete eligibility policy, chunks the exact current source, builds SQLite FTS5 strictly at `:memory:`, queries it, and closes it. Nothing is cached or written.
 
 ## Architecture
 
 ```text
-Read-only Obsidian vault
-          |
-          v
-Privacy and eligibility gate
-          |
-          v
-Heading-aware bounded chunks
-          |
-          v
-Atomic SQLite ledger + FTS5
-          |
-          v
-Deterministic BM25 ranking and source-SHA freshness check
-          |
-          v
-CLI and two read-only Hermes tools with exact citations
+read-only vault -> privacy/eligibility gate -> exact bounded chunks
+                -> process-private SQLite :memory: FTS5 -> cited results -> close
 ```
+
+Only exact current source participates in retrieval. Search cannot be stale because all eligible chunks are collected before the in-memory query runs. Any unknown read or configured resource overflow fails closed without a partial corpus.
 
 ## Privacy and correctness
 
-- Descriptor-relative, no-follow vault traversal rejects symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credential canaries. UTF-8 BOM frontmatter and quoted scalar control keys are recognized; malformed or non-scalar controls fail closed. Device, inode, size, mtime, and ctime are validated across every read.
-- SQLite state ancestors are traversed from the filesystem root with descriptor-relative `O_NOFOLLOW` opens. The lock, database, WAL, and SHM resolve through one stable state-directory descriptor, with device/inode and live vault-containment revalidation at operation boundaries. Unsupported hosts fail closed.
-- Hidden paths, configured folders/globs, false retrieval controls, and credential-bearing notes are excluded. Excluded rows store only relative path and a reason.
-- A complete scan commits notes, chunks, FTS rows, removals, and metadata in one SQLite transaction. A failed scan leaves the previous complete generation visible.
-- Compatibility binds the corpus, schema, all chunk limits, source-size bound, and content policy. Incompatible databases are never queried.
-- Every indexed candidate is re-read and re-chunked through the trusted vault descriptor. Its ID, path, title, heading, exact line span, content, snippet, digests, and FTS projection must exactly match the source-derived chunk; corrupt derived state invokes fallback and can never forge a citation.
-- Missing, corrupt, or incompatible SQLite uses a bounded in-memory filesystem lexical fallback under the same privacy, path, size, and freshness controls. Fallback never creates or modifies state.
-- Indexed and fallback modes share non-stemming Unicode lexical tokens. FTS candidates are paged until the requested number of valid fresh results, exhaustion, or a 10,000-candidate safety bound; hitting the bound invokes filesystem fallback rather than returning a false-empty result.
-- Returned snippets are explicitly untrusted quoted source data, never instructions. Human output visibly escapes C0/C1 controls, Unicode format controls, and line/paragraph separators; JSON remains escaped.
+- `TrustedVault` holds the approved root descriptor and uses descriptor-relative no-follow traversal and reads. Symlinks, non-regular entries, read races, and oversized notes are rejected.
+- Hidden paths, configured folders/globs, UTF-8 BOM or quoted false frontmatter controls, malformed retrieval controls, and credential-bearing notes are excluded.
+- Limits bound files, chunks, total bytes, note bytes, query length, result count, and path prefixes. Overflow reports incomplete/failure, never current.
+- FTS5 uses `unicode61 remove_diacritics 2`, exact non-stemming query tokens, a fixed documented English stop-word set, and BM25 weights of title `8`, heading `5`, path `3`, content `1`. Terms are OR-combined without prefix, fuzzy, or hidden expansion. Ties use path then FTS row order.
+- Citations, headings, snippets, paths, and line spans come directly from the same exact chunks inserted into the private in-memory database.
+- Returned passages are labeled untrusted quoted source data. Human output visibly escapes control, format, line-separator, and paragraph-separator characters.
+- Runtime code has no network path and no third-party dependency.
 
 ## Install and configure
 
@@ -45,55 +31,46 @@ chmod 600 /absolute/private/config.toml
 export OBSIDIAN_KB_CONFIG=/absolute/private/config.toml
 ```
 
-The fixed config must be a current-user-owned regular non-symlink file with no group/other permission bits. Its state path must be outside the vault.
+The fixed config must be a current-user-owned regular non-symlink file with no group/other permission bits. `[state]`, remote, and unknown sections are rejected.
 
 ## CLI
 
 ```bash
-imperator-knowledge index --json
 imperator-knowledge search --path-prefix Runbooks --json "deployment rollback"
-imperator-knowledge audit --json
 imperator-knowledge status --json
+imperator-knowledge audit --json
+imperator-knowledge index --json
 ```
 
-All commands use only `OBSIDIAN_KB_CONFIG`; callers cannot override config or execution mode. Queries are 1–512 characters, limits are 1–20, and path prefixes are relative traversal-safe POSIX vault paths. Index success exits `0`; usage/config errors exit `2`; corruption and invariant failures exit `1`. Compatibility entry points `imperator-search` and `imperator-vault-index` remain available.
+`index` and compatibility entry point `imperator-vault-index` now mean read-only live audit. They explicitly report `ephemeral=true`, `persistence=false`, and `compatibility=ephemeral-live`; `--dry-run` remains accepted because every audit is inherently dry. `status` performs a complete live scan and returns eligible/excluded note counts, chunk count, scan duration, inventory completeness/current, and compatibility—never note paths or content.
+
+All commands use only `OBSIDIAN_KB_CONFIG`; callers cannot override it. Queries are 1–512 characters, limits are 1–20, and path prefixes are relative traversal-safe POSIX vault paths. Config/usage errors exit `2`; scan/invariant failures exit `1`.
 
 ## Hermes plugin
 
-The plugin registers exactly:
+The plugin registers exactly two read-only tools and one command:
 
 - `obsidian_knowledge_search`
 - `obsidian_knowledge_status`
 - `/notesearch`
 
-It reads only the fixed private config. Status returns index age, source drift, current/stale and compatibility state, plus active/excluded note and chunk counts; it returns no note paths or content. Search returns lexical-only results with `path:Lstart-Lend`, Obsidian links, heading hierarchy, and untrusted snippets.
-
-Install only after local review using the Python environment that owns Hermes, then enable `obsidian-retrieval` through the normal Hermes plugin command. This repository does not modify profiles, services, schedules, vaults, or live state.
-
-## Refresh wrapper
-
-Set absolute `OBSIDIAN_KB_BIN` and fixed private `OBSIDIAN_KB_CONFIG`, then invoke `scripts/imperator_obsidian_retrieval_refresh.sh` from one private scheduler. It validates ownership/mode, locks, applies a bounded timeout, and logs only safe counts and exit classes—never queries, paths, source text, or raw errors.
-
-## Migration and rollback
-
-The v2 package uses local index schema `3`; older database generations are intentionally incompatible. Build a new side-by-side state path, run `index`, `audit`, and representative private searches, then change the private config only after acceptance. Roll back by disabling the plugin/refresh and restoring the previous config. State is derived and may be retained for diagnosis or deleted as a separate explicit operator action; vault files are never migrated.
+No caller config override or execution mode exists.
 
 ## Verification
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/obsidian-kb-pycache python3 -m compileall -q obsidian_kb hermes_plugin tests
-bash -n scripts/imperator_obsidian_retrieval_refresh.sh
 python3 -m build
 ```
 
-CI covers Python 3.11 and 3.13, an isolated wheel install, and every console entry-point smoke. Live private-vault, scheduled-run, channel, leakage, and rollback acceptance remains parent/operator-owned.
+CI covers Python 3.11 and 3.13, an isolated wheel install, and every console entry point. Tests use only synthetic disposable vaults. Live private-vault and channel acceptance remains operator-owned.
 
 ## Limitations
 
 - FTS5 must be enabled in the host SQLite build.
-- The bounded frontmatter reader is intentionally not a general YAML loader; malformed retrieval controls fail closed.
-- Secret detection is defense in depth. Keep sensitive folders excluded and credentials outside Markdown.
+- The bounded frontmatter reader is intentionally not a general YAML loader; ambiguous retrieval controls fail closed.
+- Secret detection is defense in depth. Keep credentials outside Markdown.
 - Exact cited original lines should be re-read before consequential claims.
 
 See `SECURITY.md` and `docs/architecture.md`.

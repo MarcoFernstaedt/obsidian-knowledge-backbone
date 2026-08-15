@@ -4,9 +4,6 @@ corpus_id = "curated-obsidian"
 [vault]
 path = "/path/to/your/Obsidian-vault"
 
-[state]
-sqlite_path = "/path/to/private/operator-state/index.sqlite3"
-
 [exclusions]
 hidden = true
 include_globs = ["*.md", "**/*.md"]
@@ -20,5 +17,8 @@ max_lines = 60
 max_chars = 1200
 overlap_lines = 2
 maximum_note_bytes = 2097152
-fallback_max_files = 5000
-freshness_max_files = 100000
+
+[resources]
+maximum_files = 5000
+maximum_chunks = 50000
+maximum_total_bytes = 268435456

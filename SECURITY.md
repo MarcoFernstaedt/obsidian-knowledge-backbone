@@ -6,25 +6,25 @@ Security fixes target the current `main` branch and latest tagged release.
 
 ## Data boundary
 
-The vault is read-only. State ancestors are opened from the filesystem root with descriptor-relative `O_NOFOLLOW`; symlink/non-directory ancestors are rejected. SQLite, WAL, SHM, and lock operations remain bound to one trusted state-directory descriptor outside the live vault, with device/inode and containment checks repeated at operation boundaries. Linux `/proc/self/fd` support is required and other hosts fail closed. Keep the private config and derived database readable only by the operator account.
+The vault is read-only. A complete search/status/audit opens one trusted vault root and traverses descendants with descriptor-relative no-follow operations. Symlinks, non-regular files, changed-during-read sources, and configured limits fail closed.
 
-The index suppresses hidden paths, configured exclusions, false frontmatter controls, private keys, known token formats, and high-confidence credential assignments. This is defense in depth, not a replacement for vault curation. Keep credentials in a secret store, not Markdown.
+Eligible exact chunks are inserted only into a process-private SQLite FTS5 database opened as `:memory:`. The connection is closed before results return. Runtime retrieval creates no filesystem artifact and opens no network connection.
 
-Excluded-note metadata is limited to relative path and reason. SQLite is untrusted derived state: every result is re-read and re-derived from the exact source before citation. Hermes errors disclose exception class rather than private paths or content. Search snippets are untrusted quoted source data, and human rendering escapes Unicode display controls and separators. The runtime performs no network communication.
+Hidden/configured paths, false or malformed retrieval controls, private keys, known token formats, and high-confidence credential assignments are suppressed. This is defense in depth, not a replacement for vault curation. Unknown/transient read failures and file/chunk/byte overflow abort the complete operation; no partial result is returned.
+
+Hermes errors disclose exception class rather than private paths or content. Status is path-free. Search passages are untrusted quoted source data, and human rendering escapes Unicode display controls and separators.
 
 ## Reporting
 
-Do not open a public issue containing private note text, index databases, revealing paths, credentials, or private configuration values. Report privately with a minimal synthetic reproducer.
+Do not open a public issue containing private note text, revealing paths, credentials, or private configuration values. Report privately with a minimal synthetic reproducer.
 
 ## Operator response
 
-If an indexed secret is suspected:
+If a secret-bearing note may have been retrieved:
 
 1. Disable the plugin or remove its config environment variable.
 2. Add a folder, glob, frontmatter, or secret-pattern exclusion.
-3. Refresh into a new outside-vault state path and run `audit`.
-4. Replace the active config only after verification.
-5. Delete the old SQLite state as a separate explicit action.
-6. Rotate any credential that may have been exposed.
+3. Rotate any credential that may have been exposed.
+4. Run the read-only audit and a representative search before re-enabling.
 
-The software never edits or deletes vault content and never performs automatic credential rotation.
+There is no retrieval artifact to locate or delete. The software never edits or deletes vault content and never performs automatic credential rotation.

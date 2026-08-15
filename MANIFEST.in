@@ -1,5 +1,4 @@
 include config.example.toml
 include SECURITY.md
 recursive-include docs *.md
-recursive-include scripts *.sh
 recursive-include hermes_plugin *.yaml *.md

@@ -1,5 +1,5 @@
 name: obsidian-knowledge-backbone
-version: 1.0.0
+version: 3.0.0
 description: Read-only cited retrieval over an approved Obsidian corpus.
 author: Marco Fernstaedt
 provides_tools:
