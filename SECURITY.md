@@ -18,7 +18,13 @@ Hermes errors disclose exception class rather than private paths or content. Sta
 
 ## Reporting
 
-Do not open a public issue containing private note text, revealing paths, credentials, or private configuration values. Report privately with a minimal synthetic reproducer.
+Use GitHub's private vulnerability reporting workflow:
+
+1. Open this repository's **Security** tab on GitHub.
+2. Select **Report a vulnerability**.
+3. Submit a minimal synthetic reproducer and the affected version.
+
+Do not open a public issue containing private note text, revealing paths, credentials, or private configuration values. If private vulnerability reporting is temporarily unavailable, do not disclose sensitive details publicly; wait for the private reporting route to be restored.
 
 ## Operator response
 
