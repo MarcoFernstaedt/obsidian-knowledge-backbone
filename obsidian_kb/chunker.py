@@ -7,6 +7,7 @@ import re
 import uuid
 
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
+APPLICATION_NAMESPACE = uuid.UUID("598f094b-a203-5a8f-8cca-81edc80aaed4")
 
 
 @dataclass(frozen=True)
@@ -32,20 +33,32 @@ def frontmatter(text: str) -> tuple[dict[str, str], int]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, 0
+    bounded = 0
     for index in range(1, len(lines)):
+        bounded += len(lines[index].encode("utf-8")) + 1
+        if bounded > 65_536:
+            return {"__malformed__": "true"}, 0
         if lines[index].strip() == "---":
             values: dict[str, str] = {}
             for line in lines[1:index]:
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    values[key.strip().lower()] = value.strip().lower().strip("'\"")
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                if ":" not in line:
+                    return {"__malformed__": "true"}, 0
+                key, value = line.split(":", 1)
+                if not key.strip() or key.strip().lower() in values:
+                    return {"__malformed__": "true"}, 0
+                values[key.strip().lower()] = value.strip().lower().strip("'\"")
             return values, index + 1
-    return {}, 0
+    return {"__malformed__": "true"}, 0
 
 
 def is_frontmatter_excluded(text: str, keys: tuple[str, ...]) -> bool:
     values, _ = frontmatter(text)
-    return any(values.get(key.lower()) in {"false", "no", "0", "off"} for key in keys)
+    if values.get("__malformed__") == "true":
+        return True
+    return (values.get("imperator_retrieval") == "exclude" or
+            any(values.get(key.lower()) in {"false", "no", "0", "off"} for key in keys))
 
 
 def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int):
@@ -65,7 +78,7 @@ def _bounded(parts: list[tuple[int, str]], max_lines: int, max_chars: int):
 
 
 def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: int = 60,
-                   max_chars: int = 6000) -> list[dict]:
+                   max_chars: int = 6000, corpus_id: str = "curated-obsidian") -> list[dict]:
     lines = text.splitlines()
     _, body_offset = frontmatter(text)
     stack: list[str] = []
@@ -92,6 +105,7 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
     if current:
         sections.append((current_path, current))
     chunks: list[dict] = []
+    ordinal = 0
     for heading_path, section in sections:
         if not any(line.strip() and not HEADING.match(line) for _, line in section):
             continue
@@ -100,8 +114,12 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
             if not content:
                 continue
             start, end = part[0][0], part[-1][0]
-            digest = hashlib.sha256(f"{file_path}\0{start}\0{end}\0{content}".encode()).hexdigest()
-            point_id = str(uuid.UUID(hex=digest[:32]))
-            chunks.append(Chunk(digest, point_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
-                                heading_path, start, end, content, content[:320], source_sha256).as_dict())
+            content_digest = hashlib.sha256(" ".join(content.split()).encode()).hexdigest()
+            chunk_id = str(uuid.uuid5(APPLICATION_NAMESPACE, f"{corpus_id}\0{file_path}\0{ordinal}"))
+            value = Chunk(chunk_id, chunk_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+                          heading_path, start, end, content, content[:320], source_sha256).as_dict()
+            value["ordinal"] = ordinal
+            value["content_sha256"] = content_digest
+            chunks.append(value)
+            ordinal += 1
     return chunks

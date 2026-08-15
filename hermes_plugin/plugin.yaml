@@ -1,8 +1,9 @@
 name: obsidian-knowledge-backbone
 version: 1.0.0
-description: Read-only freshness-verified Obsidian citation search.
+description: Read-only cited retrieval over an approved Obsidian corpus.
 author: Marco Fernstaedt
 provides_tools:
   - obsidian_knowledge_search
+  - obsidian_knowledge_status
 provides_commands:
-  - knowledge
+  - notesearch

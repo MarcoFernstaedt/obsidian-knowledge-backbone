@@ -14,10 +14,10 @@ class FakeOllama:
 
 class FakeQdrant:
     def __init__(self): self.points = {}; self.deleted = []
-    def ensure(self): pass
+    def ensure(self, signature=None): pass
     def upsert(self, points): self.points.update({p["id"]: p for p in points})
     def delete(self, ids): self.deleted.extend(ids); [self.points.pop(i, None) for i in ids]
-    def query(self, vector, limit): return list(self.points.values())[:limit]
+    def query(self, vector, limit, corpus_id=None): return list(self.points.values())[:limit]
 
 
 class IndexSearchTests(unittest.TestCase):
@@ -86,7 +86,8 @@ class IndexSearchTests(unittest.TestCase):
         remote = FakeQdrant(); self.run_index(ollama=FakeOllama(), qdrant=remote)
         valid_id = next(iter(remote.points))
         remote.points["stale"] = {"id": "stale", "payload": {"chunk_id": "missing"}}
-        settings = Settings(self.vault, self.state, ollama_url="http://o", qdrant_url="http://q", vector_size=2)
+        settings = Settings(self.vault, self.state, excluded_folders=("Templates",), excluded_globs=("Private/**",),
+                            ollama_url="http://o", qdrant_url="http://q", vector_size=2)
         result = search(settings, "unmatched-semantic", ollama=FakeOllama(), qdrant=remote)
         self.assertEqual([item["path"] for item in result["results"]], ["a.md"])
         self.assertIn("semantic", result["results"][0]["modes"])
@@ -99,7 +100,8 @@ class IndexSearchTests(unittest.TestCase):
                 raise RemoteError("down")
         note = self.vault / "a.md"; note.write_text("# Alpha\nunique needle")
         self.run_index()
-        settings = Settings(self.vault, self.state, ollama_url="http://o", qdrant_url="http://q", vector_size=2)
+        settings = Settings(self.vault, self.state, excluded_folders=("Templates",), excluded_globs=("Private/**",),
+                            ollama_url="http://o", qdrant_url="http://q", vector_size=2)
         result = search(settings, "needle", ollama=Down(), qdrant=FakeQdrant())
         self.assertEqual(result["results"][0]["modes"], ["lexical"])
         self.assertTrue(result["degraded"])

@@ -11,6 +11,9 @@ keywords = ["obsidian", "sqlite", "fts5", "qdrant", "ollama", "hermes"]
 
 [project.scripts]
 obsidian-kb = "obsidian_kb.cli:main"
+imperator-knowledge = "obsidian_kb.cli:main"
+imperator-search = "obsidian_kb.cli:main"
+imperator-vault-index = "obsidian_kb.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

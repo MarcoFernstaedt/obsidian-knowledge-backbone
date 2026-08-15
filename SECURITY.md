@@ -10,7 +10,7 @@ The vault is read-only. Configure SQLite state outside the vault and restrict it
 
 The index suppresses hidden paths, configured exclusions, frontmatter false notes, private keys, known token formats, and high-confidence credential assignments. This is defense in depth, not a replacement for vault curation. Keep credentials in a secret store, not Markdown.
 
-Excluded-note metadata is intentionally limited to relative path and reason. Qdrant payloads contain only a deterministic chunk identifier. Errors returned by the Hermes boundary disclose exception type, not private paths or content.
+Excluded-note metadata is intentionally limited to relative path and reason. Qdrant payloads contain only corpus/schema/model and deterministic chunk/digest metadata—never note text, titles, paths, headings, snippets, or frontmatter. Errors returned by the Hermes boundary disclose exception type, not private paths or content.
 
 ## Reporting
 

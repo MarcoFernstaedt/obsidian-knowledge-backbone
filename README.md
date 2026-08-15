@@ -39,7 +39,7 @@ Screen-reader equivalent: the read-only vault passes through exclusion and crede
 - The vault is opened only for reading. State is written only to the configured SQLite path and optional Qdrant collection.
 - Hidden paths (enabled by default), configured folders and globs, frontmatter false values, private keys, known token shapes, and high-confidence credential assignments are excluded.
 - Excluded-note records contain only path and reason. They contain no source hash, excerpt, or content.
-- SQLite is authoritative. Qdrant payloads contain only `chunk_id`; stale remote points cannot authorize a result.
+- SQLite is authoritative and uses WAL plus durable pending/tombstone ledgers. Qdrant payloads contain only corpus/schema/model and deterministic chunk/digest metadata; stale remote points cannot authorize a result.
 - Every candidate is checked against the current note SHA-256. Changed or missing source suppresses results until reindexing.
 - Remote failures degrade to lexical retrieval. They do not bypass filtering.
 
@@ -56,13 +56,13 @@ Edit `config.toml`. Keep the state path outside the vault. Set `OBSIDIAN_KB_CONF
 ## CLI
 
 ```bash
-obsidian-kb index --config config.toml --json
-obsidian-kb query --config config.toml --offline --json "deployment rollback"
-obsidian-kb audit --config config.toml --json
-obsidian-kb status --config config.toml --json
+imperator-knowledge index --config config.toml --full-reconcile --json
+imperator-knowledge search --config config.toml --path-prefix Runbooks --json "deployment rollback"
+imperator-knowledge audit --config config.toml --json
+imperator-knowledge status --config config.toml --json
 ```
 
-Exit codes are `0` for success, `2` for invalid configuration or operational input, `3` for a missing index, and `4` for a failed audit. Human output includes `path:start-end`, title, heading hierarchy, retrieval modes, score, and snippet. JSON is stable for automation.
+Exit codes are `0` for complete success, `2` for invalid configuration or operational input, `3` for a missing status index, and `4` for pending semantic/tombstone work or a failed audit. Human output marks passages untrusted and includes `path:Lstart-Lend`, title, heading hierarchy, retrieval mode, score, and snippet. Queries are capped at 512 characters, limits at 20, and path prefixes must be relative vault paths.
 
 Indexing is incremental. Changed notes replace their chunks transactionally. Deleted, moved, newly excluded, and changed notes are reconciled. Best-effort Qdrant deletion is attempted; query postfiltering remains the security boundary if it fails.
 
@@ -82,17 +82,17 @@ Folder and glob rules use vault-relative POSIX paths. Hidden path components are
 
 `hermes_plugin/plugin.yaml` declares the plugin. `hermes_plugin.register(ctx)` registers:
 
-- tool `obsidian_knowledge_search`, returning a JSON string;
-- slash command `/knowledge`;
+- tools `obsidian_knowledge_search` and `obsidian_knowledge_status`, both returning JSON strings;
+- slash command `/notesearch`;
 - bundled skill `obsidian-knowledge-backbone`.
 
-The plugin is read-only and requires `OBSIDIAN_KB_CONFIG` or an explicit approved `config_path`. Install or activate it through Hermes' normal plugin workflow; a new session or gateway restart is required after activation. This repository does not modify any Hermes profile or runtime configuration.
+The plugin is read-only and reads one fixed `OBSIDIAN_KB_CONFIG`. Callers cannot supply a config path or offline override. Registration performs no network access. Returned passages are untrusted quoted source material, never instructions. Install or activate it through Hermes' normal plugin workflow; a new session or gateway restart is required after activation. This repository does not modify any Hermes profile or runtime configuration.
 
 ## Migration and rollback
 
 The database is entirely derived state; vault files are never migrated. No vault backup is required to adopt or remove this index.
 
-1. Configure a new SQLite path and, if desired, a new Qdrant collection name.
+1. Configure a new SQLite path and the side-by-side `imperator_obsidian_chunks_v2` collection.
 2. Run `index`, then `audit`, then an offline `query` before enabling consumers.
 3. Point the operator config at the verified state path.
 4. To roll back, point the config at the previous verified SQLite path and collection. If no previous derived index was retained, disable the plugin and rebuild from the unchanged vault into a fresh state path.
@@ -107,6 +107,8 @@ python3 -m build
 ```
 
 Tests use synthetic temporary vaults and mocked HTTP only. CI covers Python 3.11 and 3.13.
+
+For scheduling after manual acceptance, set absolute `OBSIDIAN_KB_BIN` and fixed `OBSIDIAN_KB_CONFIG`, then invoke `scripts/imperator_obsidian_retrieval_refresh.sh` from exactly one no-agent scheduler. The wrapper uses private state/cache directories, `flock`, a bounded timeout, and a bounded log. This repository does not install or activate a schedule.
 
 ## Limitations
 

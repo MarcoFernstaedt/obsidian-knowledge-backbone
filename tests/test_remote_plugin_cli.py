@@ -41,21 +41,21 @@ class PluginTests(unittest.TestCase):
             def register_command(self, *args, **kw): self.commands.append((args, kw))
             def register_skill(self, *args): self.skills.append(args)
         ctx = Context(); hermes_plugin.register(ctx)
-        self.assertEqual(ctx.tools[0]["name"], "obsidian_knowledge_search")
+        self.assertEqual([tool["name"] for tool in ctx.tools], ["obsidian_knowledge_search", "obsidian_knowledge_status"])
         self.assertEqual(ctx.tools[0]["schema"]["parameters"]["additionalProperties"], False)
-        self.assertEqual(ctx.commands[0][0][0], "knowledge")
+        self.assertEqual(ctx.commands[0][0][0], "notesearch")
         self.assertEqual(ctx.skills[0][0], "obsidian-knowledge-backbone")
 
     def test_handler_returns_json_and_redacts_exception(self):
-        with patch.object(hermes_plugin, "load_settings", side_effect=RuntimeError("private path")):
-            payload = json.loads(hermes_plugin.obsidian_knowledge_search({"query": "x", "config_path": "x"}))
+        with patch.dict(os.environ, {"OBSIDIAN_KB_CONFIG": "x"}), patch.object(hermes_plugin, "load_settings", side_effect=RuntimeError("private path")):
+            payload = json.loads(hermes_plugin.obsidian_knowledge_search({"query": "x"}))
         self.assertEqual(payload, {"ok": False, "error": "knowledge search failed: RuntimeError"})
 
     def test_handler_success(self):
         expected = {"ok": True, "results": []}
-        with patch.object(hermes_plugin, "load_settings", return_value=object()), \
+        with patch.dict(os.environ, {"OBSIDIAN_KB_CONFIG": "x"}), patch.object(hermes_plugin, "load_settings", return_value=object()), \
              patch.object(hermes_plugin, "search", return_value=expected):
-            payload = json.loads(hermes_plugin.obsidian_knowledge_search({"query": "what", "config_path": "x"}))
+            payload = json.loads(hermes_plugin.obsidian_knowledge_search({"query": "what"}))
         self.assertEqual(payload, expected)
 
 
@@ -83,12 +83,12 @@ class ConfigCliTests(unittest.TestCase):
                      ["status", "--config", str(self.config), "--json"]):
             output = io.StringIO()
             with patch("sys.stdout", output): code = main(argv)
-            self.assertEqual(code, 0, (argv, output.getvalue()))
+            self.assertEqual(code, 4 if argv[0] == "index" else 0, (argv, output.getvalue()))
             self.assertTrue(json.loads(output.getvalue())["ok"])
         query_output = io.StringIO()
         with patch("sys.stdout", query_output): main(["query", "searchable", "--config", str(self.config), "--offline", "--json"])
         item = json.loads(query_output.getvalue())["results"][0]
-        self.assertEqual(item["citation"], "note.md:1-2")
+        self.assertEqual(item["citation"], "note.md:L1-L2")
 
     def test_status_missing_index_has_meaningful_exit(self):
         with patch("sys.stdout", io.StringIO()): code = main(["status", "--config", str(self.config), "--json"])

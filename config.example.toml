@@ -1,24 +1,31 @@
+schema_version = 2
+corpus_id = "curated-obsidian"
+
 [vault]
 path = "/path/to/your/Obsidian-vault"
 
 [state]
-sqlite_path = "/path/to/operator-state/obsidian-kb.sqlite3"
+sqlite_path = "/path/to/private/operator-state/index.sqlite3"
 
 [exclusions]
 hidden = true
-folders = [".git", ".obsidian", ".trash", "Templates"]
-globs = ["Private/**", "**/*.private.md"]
+include_globs = ["*.md", "**/*.md"]
+folders = [".git", ".obsidian", ".stfolder", ".trash", "Templates", "node_modules", "__pycache__", "logs", "sessions"]
+globs = ["**/*session-dump*", "**/*task-queue*", "**/*.excalidraw.md", "Private/**", "**/*.private.md"]
 frontmatter_false_keys = ["index", "semantic_index", "knowledge_index"]
 secret_patterns = []
 
 [chunking]
 max_lines = 60
-max_chars = 6000
+max_chars = 1200
+maximum_note_bytes = 2097152
+fallback_max_files = 5000
 
 [semantic]
 ollama_url = "http://127.0.0.1:11434"
 ollama_model = "nomic-embed-text"
+model_digest = "operator-recorded-model-digest"
 qdrant_url = "http://127.0.0.1:6333"
-collection = "obsidian_knowledge"
+collection = "imperator_obsidian_chunks_v2"
 vector_size = 768
 timeout = 10.0
