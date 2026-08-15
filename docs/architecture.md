@@ -2,30 +2,28 @@
 
 ## Authority and privacy
 
-The Markdown vault is the content authority and is never written. SQLite is the sole desired-state, retry, and lexical-index authority. Qdrant is a disposable semantic projection; remote points cannot authorize content. Every returned SQLite candidate is revalidated against the current exact source bytes and eligibility policy.
-
-Excluded notes store only relative path and reason. Qdrant payloads contain exactly `corpus_id`, index `schema_version`, `chunk_id`, `content_sha256`, `embedding_model`, `model_digest`, and `compatibility_signature`; they never contain note text, title, path, heading, snippet, or frontmatter. Retrieved passages are explicitly untrusted quoted source data.
+The curated Markdown vault is the content authority and is never written. SQLite is the only derived ledger and retrieval index. Every returned candidate is revalidated against current exact source bytes and the complete eligibility policy. Excluded notes store only relative path and reason. Passages are explicitly untrusted quoted source data.
 
 ## Index flow and crash recovery
 
-1. Acquire the private nonblocking index lock.
-2. Classify path exclusions before reading content, then traverse with descriptor-relative no-follow opens from a trusted root and reject symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credential canaries.
-3. Chunk allowed Markdown by heading with exact inclusive source spans and compatibility-signature/corpus/path/ordinal UUIDv5 identities.
-4. Atomically commit the complete scan's notes, chunks, FTS rows, pending semantic projections, and tombstones in one SQLite transaction. Any note failure rolls the whole scan back to the previous complete generation.
-5. Publish pending vectors to a deterministic compatibility-signature-specific physical Qdrant collection derived from the configured logical collection base, then mark each projection applied locally. A crash after network publication retries the same UUID upsert idempotently. Different generations never share a physical collection, point identity, or deletion scope.
-6. Apply durable tombstones using corpus-plus-signature-scoped deletion. Optional full reconciliation compares active local IDs only with remote IDs filtered to the same corpus and signature and cannot delete another generation.
+1. Validate the fixed private config and prove the database and lock are outside the vault.
+2. Acquire a private nonblocking single-writer lock.
+3. Classify path exclusions before content reads. Traverse with descriptor-relative no-follow opens from one trusted root and reject symlinks, non-regular entries, races, oversized files, malformed/excluded frontmatter, and credentials.
+4. Chunk allowed Markdown by headings with exact inclusive source spans and deterministic corpus/signature/path/ordinal UUIDv5 identities.
+5. Commit the complete scan's notes, chunks, FTS rows, removals, generation, and timestamp in one SQLite transaction. Any unknown read or invariant failure rolls the whole scan back.
 
-SQLite uses WAL, foreign keys, explicit transactions, and a busy timeout. Metadata binds index schema 2, corpus, logical collection, embedding model/digest, vector size, every chunk parameter, maximum source size, and the complete content-exclusion policy fingerprint. Drift requires a fresh side-by-side local generation. Qdrant preflight rejects malformed collection metadata and any existing point in the physical generation whose signature/model digest is absent or mismatched before upsert or destructive reconciliation. Scroll work is strictly bounded by page, point, response, and aggregate-byte ceilings. Configuration schema 1 and public result schema `1.0` are distinct contracts, not index-version downgrades.
+SQLite uses WAL, foreign keys, explicit transactions, and a busy timeout. Metadata binds local schema `3`, corpus, all chunk parameters, maximum source size, and a fingerprint of every content-affecting exclusion rule. Drift requires a fresh side-by-side index.
 
 ## Retrieval flow
 
-Queries are 1–512 characters and limits are 1–20. Relative `path_prefix` filters are parameterized and traversal-safe. FTS5 and semantic retrieval each request four times the result limit. Semantic candidates must map to active, applied, current SQLite rows. Fusion uses weighted reciprocal-rank fusion (`k=60`, semantic `0.60`, lexical `0.40`) with deterministic best-component-rank, path, line, and chunk-ID tie breaks.
+Queries are 1–512 characters and limits are 1–20. Relative `path_prefix` filters are normalized, traversal-safe, and parameterized. FTS5 uses BM25 with deterministic score, path, line, and chunk-ID ordering. Before publication, each result is re-read through the trusted vault descriptor and its exact SHA-256 must equal the indexed source SHA.
 
-Remote failures or malformed remote rows return lexical results immediately. Missing, corrupt, or incompatible SQLite invokes a bounded, in-memory, read-only filesystem lexical fallback that uses the same path, frontmatter, size, symlink, and secret policy. Freshness uses a separate complete source inventory with an explicit maximum; overflow or unknown reads report stale/unknown rather than false-current. Status and search output expose generated time, age, pending vectors, pending tombstones, inventory completeness, and stale state without exposing note metadata.
+If SQLite is missing, corrupt, or incompatible, retrieval scans at most the configured filesystem bound in memory and applies the same path, frontmatter, source-size, symlink, race, and credential policy. It writes no state. Status performs a separately bounded complete inventory: overflow or unknown reads report incomplete/stale rather than false-current.
 
 ## Interfaces
 
-- CLI: `imperator-knowledge search`, `index`, `status`, and `audit`, plus packaged compatibility entry points.
+- CLI: `imperator-knowledge` index, search/query, status, and audit, plus compatibility entry points.
 - Hermes plugin: exactly `obsidian_knowledge_search`, `obsidian_knowledge_status`, and `/notesearch`.
-- Plugin configuration is fixed by `OBSIDIAN_KB_CONFIG`; callers cannot supply config paths or force offline policy.
-- Registration performs no network access. Search network calls have a five-second per-request ceiling before lexical degradation.
+- Configuration is fixed by `OBSIDIAN_KB_CONFIG`; no caller path or execution-mode override exists.
+- Search reports lexical mode only. Status reports local age, drift, current/stale, compatibility, active/excluded notes, and chunks without note paths.
+- All runtime paths are network-free.

@@ -12,7 +12,7 @@ hidden = true
 include_globs = ["*.md", "**/*.md"]
 folders = [".git", ".obsidian", ".stfolder", ".trash", "Templates", "node_modules", "__pycache__", "logs", "sessions"]
 globs = ["**/*session-dump*", "**/*task-queue*", "**/*.excalidraw.md", "Private/**", "**/*.private.md"]
-frontmatter_false_keys = ["index", "semantic_index", "knowledge_index"]
+frontmatter_false_keys = ["index", "knowledge_index"]
 secret_patterns = []
 
 [chunking]
@@ -21,16 +21,4 @@ max_chars = 1200
 overlap_lines = 2
 maximum_note_bytes = 2097152
 fallback_max_files = 5000
-# Status inventories are complete up to this fail-closed ceiling; overflow reports unknown/stale.
 freshness_max_files = 100000
-
-[semantic]
-ollama_url = "http://127.0.0.1:11434"
-ollama_model = "nomic-embed-text"
-model_digest = "operator-recorded-model-digest"
-qdrant_url = "http://127.0.0.1:6333"
-collection = "imperator_obsidian_chunks_v2"
-vector_size = 768
-timeout = 10.0
-batch_size = 8
-response_max_bytes = 8388608

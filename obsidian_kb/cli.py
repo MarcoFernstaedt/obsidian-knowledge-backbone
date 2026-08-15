@@ -1,4 +1,4 @@
-"""Deterministic operator CLI for indexing, search, audit, and status."""
+"""Deterministic operator CLI for local indexing, search, audit, and status."""
 from __future__ import annotations
 
 import argparse
@@ -13,10 +13,13 @@ from .search import search, status_with_freshness
 from .store import CompatibilityError, Store
 from .rendering import sanitize_human
 
+CONFIG_ENV = "OBSIDIAN_KB_CONFIG"
 
-def _settings(args):
-    return load_settings(args.config or os.environ.get("OBSIDIAN_KB_CONFIG"),
-                         vault=getattr(args, "vault", None), state=getattr(args, "state", None))
+
+def _settings():
+    path = os.environ.get(CONFIG_ENV)
+    if not path: raise ConfigError(f"{CONFIG_ENV} is required")
+    return load_settings(path, require_private=True)
 
 
 def _emit(payload: dict, as_json: bool):
@@ -24,7 +27,7 @@ def _emit(payload: dict, as_json: bool):
     elif "results" in payload:
         for item in payload["results"]:
             heading = " > ".join(sanitize_human(value) for value in item["heading_path"]) or "(note body)"
-            print(f"{sanitize_human(item['citation'])} | {sanitize_human(item['title'])} | {heading} | {sanitize_human(item['retrieval_type'])} | {item['score']:.6f}")
+            print(f"{sanitize_human(item['citation'])} | {sanitize_human(item['title'])} | {heading} | lexical | {item['score']:.8f}")
             print("UNTRUSTED QUOTED SOURCE: " + sanitize_human(item["snippet"]))
         for warning in payload.get("warnings", []): print(f"Warning: {sanitize_human(warning)}", file=sys.stderr)
     else:
@@ -33,77 +36,61 @@ def _emit(payload: dict, as_json: bool):
 
 
 def cmd_index(args):
-    engine = Indexer(_settings(args))
-    try: payload = engine.run(full_reconcile=args.full_reconcile, dry_run=args.dry_run)
+    engine = Indexer(_settings())
+    try: payload = engine.run(dry_run=args.dry_run)
     finally: engine.close()
-    _emit(payload, args.json)
-    return 4 if payload.get("pending_vectors") or payload.get("pending_tombstones") else 0
+    _emit(payload, args.json); return 0
 
 
 def cmd_query(args):
-    payload = search(_settings(args), args.query, limit=args.limit, offline=args.offline,
-                     path_prefix=args.path_prefix)
+    payload = search(_settings(), args.query, limit=args.limit, path_prefix=args.path_prefix)
     _emit(payload, args.json); return 0
 
 
 def _audit(settings):
     store = Store(settings.state, settings=settings, read_only=True)
-    try:
-        integrity = store.conn.execute("PRAGMA quick_check(1)").fetchone()[0]
+    try: integrity = store.conn.execute("PRAGMA quick_check(1)").fetchone()[0]
     finally: store.close()
     status = status_with_freshness(settings)
-    return {"ok": integrity == "ok" and not status["stale"], "integrity": integrity, **status}
+    return {"ok": integrity == "ok" and status["current"], "integrity": integrity, **status}
 
 
 def cmd_audit(args):
-    payload = _audit(_settings(args)); _emit(payload, args.json); return 0 if payload["ok"] else 4
+    payload = _audit(_settings()); _emit(payload, args.json); return 0 if payload["ok"] else 1
 
 
 def cmd_status(args):
-    settings = _settings(args)
+    settings = _settings()
     if not settings.state.is_file():
-        payload = {"ok": False, "error": "index not found", "error_class": "MissingIndex"}
-        _emit(payload, args.json); return 2
-    payload = {"ok": True, **status_with_freshness(settings)}
-    _emit(payload, args.json); return 0
+        _emit({"ok": False, "error": "index not found", "error_class": "MissingIndex"}, args.json); return 2
+    payload = {"ok": True, **status_with_freshness(settings)}; _emit(payload, args.json); return 0
 
 
-def _common(child):
-    child.add_argument("--config"); child.add_argument("--vault"); child.add_argument("--state")
-    child.add_argument("--json", action="store_true")
+def _json(child): child.add_argument("--json", action="store_true")
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="imperator-knowledge", description="Privacy-bound Obsidian citation search")
+    parser = argparse.ArgumentParser(prog="imperator-knowledge", description="Private local Obsidian citation search")
     sub = parser.add_subparsers(dest="command", required=True)
-    index = sub.add_parser("index"); _common(index); index.add_argument("--dry-run", action="store_true")
-    index.add_argument("--full-reconcile", action="store_true"); index.set_defaults(handler=cmd_index)
+    index = sub.add_parser("index"); _json(index); index.add_argument("--dry-run", action="store_true"); index.set_defaults(handler=cmd_index)
     for name, handler in (("audit", cmd_audit), ("status", cmd_status)):
-        child = sub.add_parser(name); _common(child); child.set_defaults(handler=handler)
+        child = sub.add_parser(name); _json(child); child.set_defaults(handler=handler)
     for name in ("search", "query"):
-        query = sub.add_parser(name); query.add_argument("query"); _common(query)
-        query.add_argument("--limit", "-k", type=int, default=5); query.add_argument("--path-prefix")
-        query.add_argument("--offline", action="store_true"); query.set_defaults(handler=cmd_query)
+        query = sub.add_parser(name); query.add_argument("query"); _json(query)
+        query.add_argument("--limit", "-k", type=int, default=5); query.add_argument("--path-prefix"); query.set_defaults(handler=cmd_query)
     return parser
 
 
 def main(argv=None):
-    try:
-        args = build_parser().parse_args(argv); return args.handler(args)
+    try: args = build_parser().parse_args(argv); return args.handler(args)
     except (ConfigError, ValueError) as exc:
         print(json.dumps({"ok": False, "error_class": type(exc).__name__}), file=sys.stderr); return 2
     except (CompatibilityError, IndexLockError, sqlite3.Error, OSError) as exc:
         print(json.dumps({"ok": False, "error_class": type(exc).__name__}), file=sys.stderr); return 1
 
 
-def imperator_search_main(argv=None):
-    values = list(sys.argv[1:] if argv is None else argv)
-    return main(["search", *values])
-
-
-def imperator_vault_index_main(argv=None):
-    values = list(sys.argv[1:] if argv is None else argv)
-    return main(["index", *values])
+def imperator_search_main(argv=None): return main(["search", *list(sys.argv[1:] if argv is None else argv)])
+def imperator_vault_index_main(argv=None): return main(["index", *list(sys.argv[1:] if argv is None else argv)])
 
 
 if __name__ == "__main__": raise SystemExit(main())

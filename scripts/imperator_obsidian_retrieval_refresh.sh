@@ -22,14 +22,14 @@ LOG="$CACHE_HOME/refresh.log"
 [[ -f "$LOG" ]] && [[ $(wc -c <"$LOG") -gt 1048576 ]] && mv -f "$LOG" "$LOG.1"
 
 set +e
-output=$(flock -n "$LOCK" timeout --signal=TERM 10m "$OBSIDIAN_KB_BIN" index --full-reconcile --json 2>/dev/null)
+output=$(flock -n "$LOCK" timeout --signal=TERM 10m "$OBSIDIAN_KB_BIN" index --json 2>/dev/null)
 status=$?
 set -e
 if [[ -n "$output" ]]; then
   summary=$(printf '%s' "$output" | python3 -c 'import json,sys
 try:
  d=json.load(sys.stdin)
- keys=("changed","excluded","unchanged","removed","active_notes","chunks","pending_vectors","pending_tombstones","source_drift_count")
+ keys=("changed","excluded","unchanged","removed","active_notes","excluded_notes","chunks")
  print(" ".join(f"{k}={int(d[k])}" for k in keys if isinstance(d.get(k),int)))
 except Exception:
  pass')

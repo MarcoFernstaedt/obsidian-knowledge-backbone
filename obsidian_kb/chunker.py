@@ -14,7 +14,6 @@ APPLICATION_NAMESPACE = uuid.UUID("598f094b-a203-5a8f-8cca-81edc80aaed4")
 @dataclass(frozen=True)
 class Chunk:
     chunk_id: str
-    point_id: str
     file_path: str
     title: str
     heading_path: tuple[str, ...]
@@ -169,7 +168,7 @@ def chunk_markdown(text: str, source_sha256: str, file_path: str, *, max_lines: 
             content_digest = hashlib.sha256(" ".join(content.split()).encode()).hexdigest()
             chunk_id = str(uuid.uuid5(APPLICATION_NAMESPACE,
                                       f"{corpus_id}\0{compatibility_signature}\0{file_path}\0{ordinal}"))
-            value = Chunk(chunk_id, chunk_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+            value = Chunk(chunk_id, file_path, title or file_path.rsplit("/", 1)[-1].removesuffix(".md"),
                           heading_path, start, end, content, content[:320], source_sha256).as_dict()
             value["ordinal"] = ordinal
             value["content_sha256"] = content_digest
