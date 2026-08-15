@@ -1,10 +1,66 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local application configuration and data
+config.toml
+config.*.toml
+!config.example.toml
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Python environments, caches, tooling, and build output
 .venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
 build/
 dist/
 *.egg-info/
-*.sqlite
-*.sqlite3
-config.toml
+.eggs/
+
+# Node tooling
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+.cache/
+*.tmp
+*.swp
+*~
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+Thumbs.db
+Desktop.ini

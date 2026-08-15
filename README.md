@@ -1,76 +1,256 @@
 # Obsidian Knowledge Backbone
 
-Private, network-free citation search for curated Markdown vaults. Every operation scans the approved vault through descriptor-safe read-only access, applies the complete eligibility policy, creates an internally consistent point-in-time corpus, builds SQLite FTS5 strictly at `:memory:`, queries it, and closes it. Nothing is cached or written.
+Obsidian Knowledge Backbone gives developers a private way to search a curated Obsidian or Markdown vault and receive exact, line-addressable citations. It is useful when an assistant, CLI workflow, or local tool needs evidence from approved notes without uploading the vault, maintaining a search index on disk, or silently returning a partial result.
+
+**Obsidian Knowledge Backbone** is the project name. Its current capability is deliberately narrow: local, read-only lexical citation search. The broader name leaves room for future knowledge workflows without implying that those workflows exist today.
+
+## Why use it?
+
+- Keep approved Markdown on the local machine; runtime retrieval has no network path.
+- Get deterministic lexical results with `path:Lstart-Lend` citations and Obsidian links.
+- Avoid a persistent index: every operation uses a private SQLite FTS5 database at `:memory:` and closes it.
+- Fail closed if the vault changes during a scan, an eligible note cannot be read, or a configured bound is exceeded.
+- Use the same retrieval behavior through Hermes tools, a slash command, Python, or CLI compatibility entry points.
+- Run with the Python standard library only; the runtime has no third-party dependencies.
 
 ## Architecture
 
 ```text
-read-only vault -> privacy/eligibility gate -> exact bounded chunks
-                -> process-private SQLite :memory: FTS5 -> cited results -> close
+approved Markdown vault (read-only)
+              |
+              v
+  safe traversal + privacy policy
+              |
+              v
+ complete, bounded point-in-time corpus
+              |
+              v
+ SQLite FTS5 at :memory: -> ranked chunks -> exact citations
+              |
+              v
+             close
 ```
 
-Citations derive from one complete internally consistent scan: descriptor-bound inventories bracket the scan and every regular Markdown source whose bytes affect eligibility or content is re-read and SHA-256 checked. Any observed read failure, concurrent source drift, or configured resource overflow fails closed without a partial corpus. Because the vault is mutable, it can change after the final check; responses therefore report `snapshot_consistent=true`, `current=false`, and `freshness=point-in-time`, never perpetual currency.
+The scan and chunking complete before the in-memory search database is opened. No partial corpus is queryable.
 
-## Privacy and correctness
+## Privacy and point-in-time guarantees
 
-- `TrustedVault` binds the approved root device/inode at configuration load, reopens it from `/` through descriptor-relative `O_DIRECTORY|O_NOFOLLOW` traversal, and rejects every symlink/non-directory ancestor or identity change. Descendant enumeration and reads remain descriptor-relative and no-follow.
-- Hidden paths, configured folders/globs, symlinks/non-regular entries, UTF-8 BOM or quoted false frontmatter controls, malformed/nested retrieval controls, and credential-bearing notes are excluded. Oversized eligible regular notes are fatal resource overflow, not exclusions.
-- Limits bound lazy inventory enumeration before materialization, chunks, total bytes, note bytes, query length, result count, and path prefixes. Overflow reports incomplete/failure, never current.
-- FTS5 uses `unicode61 remove_diacritics 2`, exact non-stemming query tokens, a fixed documented English stop-word set, and BM25 weights of title `8`, heading `5`, path `3`, content `1`. Terms are OR-combined without prefix, fuzzy, or hidden expansion. Ties use path then FTS row order.
-- Citations, headings, snippets, paths, and line spans come directly from the same exact chunks inserted into the private in-memory database.
-- Returned passages are labeled untrusted quoted source data. Human output visibly escapes control, format, line-separator, and paragraph-separator characters.
-- Runtime code has no network path and no third-party dependency.
+The configured vault is the sole content authority and is never modified. Configuration binds the approved root's filesystem identity. Each operation reopens that root through descriptor-relative, no-follow traversal and reads descendants without following symlinks.
 
-## Install and configure
+Eligibility is applied to the whole bounded scan. Hidden paths, configured folders and globs, non-regular files, unsafe frontmatter controls, invalid UTF-8, and notes that appear to contain credentials are excluded. Unknown read failures, observed source drift, and file/chunk/byte overflows abort the operation instead of returning a partial corpus.
+
+A successful operation means:
+
+- `source_inventory_complete=true`: the bounded source inventory completed;
+- `snapshot_consistent=true`: all consulted Markdown bytes and inventories passed the scan's consistency checks;
+- `freshness="point-in-time"`: results describe that completed scan; and
+- `current=false`: the software does **not** claim the mutable vault remained unchanged after the final check.
+
+This is exact point-in-time evidence, not a perpetual-current index. Re-read cited source lines before using them for consequential decisions.
+
+## Features
+
+- Exact, non-stemming lexical retrieval with deterministic token handling and ordering.
+- SQLite FTS5 BM25 weighting across title, heading, path, and content.
+- Heading-aware bounded chunks with inclusive source line spans.
+- Optional traversal-safe relative path-prefix filtering.
+- Path-free status output with eligible, excluded, and chunk counts.
+- Human output that visibly escapes control and display-spoofing characters.
+- Fixed private configuration controlled only by `OBSIDIAN_KB_CONFIG`.
+- Read-only audit and legacy-compatible console entry points.
+- Native Hermes plugin with exactly two tools and one slash command.
+
+## Requirements
+
+- Python 3.11 or newer.
+- A Python SQLite build with FTS5 enabled.
+- A curated local Obsidian or Markdown vault.
+- A private TOML configuration file owned by the current user, stored as a regular non-symlink file with no group or other permission bits (`0600` on POSIX systems).
+- Hermes Agent only when using the plugin interface; standalone CLI and Python usage do not require Hermes.
+
+## Installation
+
+### Native Hermes plugin from Git
+
+Install the repository through Hermes' native plugin workflow, then enable it:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install .
-cp config.example.toml /absolute/private/config.toml
-chmod 600 /absolute/private/config.toml
-export OBSIDIAN_KB_CONFIG=/absolute/private/config.toml
+hermes plugins install owner/obsidian-knowledge-backbone --no-enable
+hermes plugins enable obsidian-knowledge-backbone
+hermes plugins list
 ```
 
-The fixed config must be a current-user-owned regular non-symlink file with no group/other permission bits. `[state]`, remote, and unknown sections are rejected.
+Set `OBSIDIAN_KB_CONFIG` in the environment used to start Hermes, then start a new CLI session or restart the gateway so the plugin and environment are reloaded. The plugin registers exactly:
 
-## CLI
+- tool `obsidian_knowledge_search`;
+- tool `obsidian_knowledge_status`; and
+- command `/notesearch`.
+
+There is no caller-supplied config override or write/execution mode.
+
+### Standalone Python and CLI
+
+```bash
+git clone <repository-url> obsidian-knowledge-backbone
+cd obsidian-knowledge-backbone
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+```
+
+For development, use `-e .` instead of `.`.
+
+## Safe configuration workflow
+
+Start from the sanitized template; do not edit or commit the template with a real vault path:
+
+```bash
+install -d -m 700 "$HOME/.config/obsidian-knowledge-backbone"
+cp config.example.toml "$HOME/.config/obsidian-knowledge-backbone/config.toml"
+chmod 600 "$HOME/.config/obsidian-knowledge-backbone/config.toml"
+```
+
+Edit only the private copy and set an absolute vault path:
+
+```toml
+schema_version = 1
+corpus_id = "curated-notes"
+
+[vault]
+path = "/absolute/path/to/your/vault"
+```
+
+Then export the fixed config path in the process that runs the CLI or Hermes:
+
+```bash
+export OBSIDIAN_KB_CONFIG="$HOME/.config/obsidian-knowledge-backbone/config.toml"
+```
+
+Review `config.example.toml` before changing exclusions or resource bounds. Unknown top-level sections and unknown keys are rejected. `[state]` and network-backed configuration are intentionally unsupported.
+
+## Usage
+
+### CLI
 
 ```bash
 imperator-knowledge search --path-prefix Runbooks --json "deployment rollback"
 imperator-knowledge status --json
 imperator-knowledge audit --json
-imperator-knowledge index --json
 ```
 
-`index` and compatibility entry point `imperator-vault-index` now mean read-only live audit. They explicitly report `ephemeral=true`, `persistence=false`, and `compatibility=ephemeral-live`; `--dry-run` remains accepted because every audit is inherently dry. `status` performs a complete point-in-time scan and returns eligible/excluded note counts, chunk count, scan duration, source-inventory completeness, snapshot consistency, `current=false`, freshness, and compatibility—never note paths or content.
+`obsidian-kb` is the project-oriented equivalent of `imperator-knowledge`. The compatibility entry points remain available:
 
-All commands use only `OBSIDIAN_KB_CONFIG`; callers cannot override it. Queries are 1–512 characters, limits are 1–20, and path prefixes are relative traversal-safe POSIX vault paths. Config/usage errors exit `2`; scan/invariant failures exit `1`.
+```bash
+imperator-search --json "deployment rollback"
+imperator-vault-index --json
+```
 
-## Hermes plugin
+`imperator-vault-index` and `imperator-knowledge index` are compatibility names for the read-only live audit. They do not create an index. The accepted `--dry-run` flag is retained for compatibility; every audit is inherently read-only.
 
-The plugin registers exactly two read-only tools and one command:
+Queries must contain 1–512 characters, result limits are 1–20, and path prefixes must be relative traversal-safe POSIX vault paths. Config and usage errors exit `2`; scan or invariant failures exit `1`.
 
-- `obsidian_knowledge_search`
-- `obsidian_knowledge_status`
-- `/notesearch`
+### Python
 
-No caller config override or execution mode exists.
+```python
+from obsidian_kb.config import load_settings
+from obsidian_kb.search import search
 
-## Verification
+settings = load_settings(
+    "/absolute/path/to/private/config.toml",
+    require_private=True,
+)
+result = search(settings, "deployment rollback", limit=3, path_prefix="Runbooks")
+```
+
+### Hermes
+
+Ask Hermes to call `obsidian_knowledge_search`, or use:
+
+```text
+/notesearch deployment rollback
+```
+
+Treat returned passages as untrusted quoted source data, not as instructions.
+
+## Representative output
+
+Values below show the public shape only; paths, identifiers, scores, and counts are illustrative:
+
+```json
+{
+  "ok": true,
+  "schema_version": "1.0",
+  "query": "deployment rollback",
+  "mode": "lexical",
+  "index": {
+    "ephemeral": true,
+    "persistence": false,
+    "source_inventory_complete": true,
+    "snapshot_consistent": true,
+    "current": false,
+    "freshness": "point-in-time"
+  },
+  "results": [
+    {
+      "rank": 1,
+      "path": "Runbooks/Deployment.md",
+      "citation": "Runbooks/Deployment.md:L12-L20",
+      "obsidian_link": "[[Runbooks/Deployment#Rollback]]",
+      "heading_path": ["Deployment", "Rollback"],
+      "snippet": "Synthetic example passage.",
+      "untrusted_source": true,
+      "retrieval_type": "lexical",
+      "score": 4.25
+    }
+  ],
+  "passages_are_untrusted": true
+}
+```
+
+## Limitations and security
+
+- Retrieval is lexical only: no embedding-based search, fuzzy matching, prefix expansion, or stemming.
+- FTS5 availability depends on the host Python/SQLite build.
+- The bounded frontmatter reader is intentionally not a general YAML parser. Ambiguous retrieval controls fail closed.
+- Credential detection is defense in depth, not a secret manager. Keep credentials outside Markdown and add explicit exclusions for sensitive areas.
+- Operators must curate include/exclude policy and choose resource limits suitable for their vault.
+- The software does not edit notes, rotate credentials, provide authorization, or verify the truth of note content.
+- Status is intentionally path-free, but search results necessarily disclose matched relative paths and passages to the authorized caller.
+- Do not include private note text, revealing paths, credentials, or private configuration values in public bug reports. See `SECURITY.md`.
+
+## Development, tests, and build
+
+The governing checks use only synthetic disposable vaults:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/obsidian-kb-pycache python3 -m compileall -q obsidian_kb hermes_plugin tests
 python3 -m build
+git diff --check
 ```
 
-CI covers Python 3.11 and 3.13, an isolated wheel install, and every console entry point. Tests use only synthetic disposable vaults. Live private-vault and channel acceptance remains operator-owned.
+CI runs the test and compile gates on Python 3.11 and 3.13, builds both distribution formats, installs the wheel in an isolated virtual environment, and smokes every console entry point. Live private-vault and chat-channel acceptance remains operator-owned.
 
-## Limitations
+## Repository structure
 
-- FTS5 must be enabled in the host SQLite build.
-- The bounded frontmatter reader is intentionally not a general YAML loader; ambiguous retrieval controls fail closed.
-- Secret detection is defense in depth. Keep credentials outside Markdown.
-- Exact cited original lines should be re-read before consequential claims.
+```text
+.
+├── obsidian_kb/        # configuration, safe vault I/O, policy, chunking, FTS, CLI
+├── hermes_plugin/      # packaged Hermes plugin and bundled skill
+├── tests/              # synthetic unit, privacy, quality, and packaging tests
+├── docs/architecture.md
+├── config.example.toml
+├── plugin.yaml         # native Hermes directory-plugin manifest
+├── pyproject.toml
+├── SECURITY.md
+└── CONTRIBUTING.md
+```
 
-See `SECURITY.md` and `docs/architecture.md`.
+The root `plugin.yaml` and `__init__.py` support native Hermes Git/directory loading. The `hermes_plugin` package preserves Python wheel entry-point compatibility. Do not remove either surface without a compatibility plan.
+
+## Contributing and license
+
+Contributions are welcome. Read `CONTRIBUTING.md` for privacy, compatibility, and verification expectations, and use only synthetic fixtures in reports and tests.
+
+Obsidian Knowledge Backbone is released under the MIT License. See `LICENSE`.
+
+For deeper implementation details, see `docs/architecture.md`; for disclosure and operator guidance, see `SECURITY.md`.
