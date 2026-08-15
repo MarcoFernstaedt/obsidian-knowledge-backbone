@@ -43,8 +43,8 @@ def search(settings: Settings, question: str, *, limit: int = 5,
         raise ValueError("limit must be between 1 and 20")
     prefix = validate_relative_prefix(path_prefix)
 
-    # The complete current source is scanned and chunked before SQLite exists.
-    # Any scan error aborts; no partial corpus or result is available to return.
+    # A complete internally consistent point-in-time snapshot is scanned and
+    # chunked before SQLite exists. The mutable authority may change afterward.
     corpus = scan(settings)
     with MemoryFTS(corpus) as database:
         rows = database.query(question, limit, prefix)

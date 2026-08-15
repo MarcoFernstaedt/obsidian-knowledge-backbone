@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import stat
 import tempfile
 import time
 import unittest
@@ -69,6 +70,7 @@ class EphemeralArchitectureTests(unittest.TestCase):
             result = search(self.settings, "deployment rollback")
             status = live_status(self.settings)
             report = audit(self.settings)
+            plugin_status = json.loads(hermes_plugin.obsidian_knowledge_status({}))
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 self.assertEqual(main(["index", "--json"]), 0)
@@ -78,6 +80,10 @@ class EphemeralArchitectureTests(unittest.TestCase):
             with self.assertRaises(sqlite3.ProgrammingError):
                 connection.execute("SELECT 1")
         self.assertEqual(result["results"][0]["citation"], "note.md:L1-L2")
+        for point_in_time in (result["index"], status, report, plugin_status["index"]):
+            self.assertFalse(point_in_time["current"])
+            self.assertTrue(point_in_time["snapshot_consistent"])
+            self.assertEqual(point_in_time["freshness"], "point-in-time")
         self.assertEqual(status["compatibility"], "ephemeral-live")
         self.assertTrue(status["source_inventory_complete"])
         self.assertTrue(report["ephemeral"])
@@ -101,12 +107,35 @@ class EphemeralArchitectureTests(unittest.TestCase):
         self.assertEqual(status["eligible_notes"], 1)
         self.assertEqual(status["excluded_notes"], 1)
         self.assertEqual(status["chunks"], 1)
-        self.assertTrue(status["current"])
+        self.assertFalse(status["current"])
+        self.assertTrue(status["snapshot_consistent"])
+        self.assertEqual(status["freshness"], "point-in-time")
         self.assertTrue(status["source_inventory_complete"])
         self.assertGreaterEqual(status["scan_duration_ms"], 0)
         rendered = json.dumps(status)
         self.assertNotIn("active.md", rendered)
         self.assertNotIn(str(self.vault), rendered)
+
+    def test_search_never_claims_perpetual_currency_after_final_inventory(self):
+        note = self.vault / "race.md"
+        note.write_text("# Race\noldcanary\n")
+        original = TrustedVault.inventory
+        calls = 0
+
+        def inventory(bound, maximum_entries):
+            nonlocal calls
+            result = original(bound, maximum_entries)
+            calls += 1
+            if calls == 3:
+                note.unlink()
+            return result
+
+        with patch.object(TrustedVault, "inventory", inventory):
+            result = search(self.settings, "oldcanary")
+        self.assertEqual(result["results"][0]["path"], "race.md")
+        self.assertFalse(result["index"]["current"])
+        self.assertTrue(result["index"]["snapshot_consistent"])
+        self.assertEqual(result["index"]["freshness"], "point-in-time")
 
     def test_unknown_read_failure_and_resource_overflow_fail_closed(self):
         (self.vault / "a.md").write_text("# A\nneedle\n")
@@ -138,16 +167,19 @@ class EphemeralArchitectureTests(unittest.TestCase):
         self.assertNotIn("x" * 16, rendered)
 
     def test_control_key_projection_nested_controls_and_yaml_secret_lists_fail_closed(self):
-        settings = Settings(self.vault, frontmatter_false_keys=("KNOWLEDGE_ẞ", "index"))
+        settings = Settings(self.vault, frontmatter_false_keys=("KNOWLEDGE_SS", "index"))
         notes = {
-            "unicode.md": "---\nKNOWLEDGE_SS: false\n---\n# Private\nunicodecanary\n",
+            "unicode.md": "---\nknowledge_ss: false\n---\n# Private\nunicodecanary\n",
             "nested.md": "---\nmeta:\n  index: false\n---\n# Private\nnestedcanary\n",
             "list-secret.md": "# Private\n- api_key: hunter2-secret\nlistcanary\n",
             "indented-secret.md": "# Private\n  - token: hunter2-secret\nindentcanary\n",
+            "quoted-secret.md": "# Private\n- 'API_KEY': 'abc''synthetic-secret-canary'\nquotedcanary\n",
+            "block-secret.md": "# Private\n- TOKEN: |\n    synthetic-secret-canary\nblockcanary\n",
         }
         for name, text in notes.items():
             (self.vault / name).write_text(text)
-        for canary in ("unicodecanary", "nestedcanary", "listcanary", "indentcanary"):
+        for canary in ("unicodecanary", "nestedcanary", "listcanary", "indentcanary",
+                       "quotedcanary", "blockcanary"):
             self.assertEqual(search(settings, canary)["results"], [])
 
         (self.vault / "ordinary-metadata.md").write_text(
@@ -157,9 +189,30 @@ class EphemeralArchitectureTests(unittest.TestCase):
                          "ordinary-metadata.md")
 
     def test_control_key_configuration_rejects_ambiguous_or_dangerous_names(self):
-        for keys in (("index", "INDEX"), ("imperator_retrieval",), ("bad:key",), ("bad\nkey",)):
+        for keys in (("index", "INDEX"), ("imperator_retrieval",), ("bad:key",), ("bad\nkey",),
+                     ("index", "іndex"), ("éxclude",), ("_index",), ("x" * 65,)):
             with self.subTest(keys=keys), self.assertRaises(ConfigError):
                 Settings(self.vault, frontmatter_false_keys=keys)
+
+    def test_private_config_rejects_same_inode_parse_aba_and_permission_drift(self):
+        config = self.config()
+        foreign = self.root / "foreign"
+        foreign.mkdir()
+        import obsidian_kb.config as config_module
+        real_load = config_module.tomllib.load
+
+        def mutate_after_parse(handle):
+            loaded = real_load(handle)
+            inode = config.stat().st_ino
+            config.write_text(f'schema_version = 1\n[vault]\npath = "{foreign}"\n')
+            config.chmod(0o644)
+            self.assertEqual(config.stat().st_ino, inode)
+            return loaded
+
+        with patch("obsidian_kb.config.tomllib.load", mutate_after_parse):
+            with self.assertRaises(ConfigError):
+                load_settings(config, require_private=True)
+        self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o644)
 
     def test_bound_vault_root_rejects_replaced_symlink_ancestor(self):
         approved = self.root / "approved"
@@ -211,6 +264,76 @@ class EphemeralArchitectureTests(unittest.TestCase):
         with patch.object(TrustedVault, "read", read):
             with self.assertRaises(CorpusScanError):
                 search(self.settings, "oldcanary")
+
+    def test_scan_sha_revalidates_content_excluded_and_invalid_utf8_sources(self):
+        excluded = self.vault / "excluded.md"
+        excluded.write_text("---\nindex: false\n---\n# Private\noldcanary\n")
+        original_inventory = TrustedVault.inventory
+        frozen = None
+        import obsidian_kb.corpus as corpus_module
+        original_exclusion = corpus_module.content_exclusion_reason
+
+        def inventory(bound, maximum_entries):
+            nonlocal frozen
+            current = original_inventory(bound, maximum_entries)
+            if frozen is None:
+                frozen = current
+            return frozen
+
+        def exclusion(text, settings):
+            reason = original_exclusion(text, settings)
+            excluded.write_text("---\nindex: true \n---\n# Private\nnewcanary\n")
+            return reason
+
+        with patch.object(TrustedVault, "inventory", inventory), \
+                patch("obsidian_kb.corpus.content_exclusion_reason", exclusion):
+            with self.assertRaises(CorpusScanError):
+                search(self.settings, "oldcanary")
+
+        invalid = self.vault / "invalid.md"
+        invalid.write_bytes(b"# Invalid\n\xffoldcanary\n")
+        original_read = TrustedVault.read
+        frozen = None
+
+        def read(bound, relative_path, maximum_bytes):
+            result = original_read(bound, relative_path, maximum_bytes)
+            if relative_path == "invalid.md":
+                invalid.write_bytes(b"# Invalid\n\xffnewcanary\n")
+            return result
+
+        with patch.object(TrustedVault, "inventory", inventory), \
+                patch.object(TrustedVault, "read", read):
+            with self.assertRaises(CorpusScanError):
+                search(self.settings, "oldcanary")
+
+    def test_inventory_limit_stops_scandir_before_unbounded_materialization(self):
+        for number in range(100):
+            (self.vault / f"entry-{number:03}.txt").write_text("x")
+        import obsidian_kb.vault_io as vault_io
+        original_scandir = vault_io.os.scandir
+        consumed = 0
+
+        class CountingScandir:
+            def __init__(self, iterator): self.iterator = iterator
+            def __iter__(self): return self
+            def __next__(self):
+                nonlocal consumed
+                item = next(self.iterator)
+                consumed += 1
+                return item
+            def close(self): self.iterator.close()
+            def __enter__(self): return self
+            def __exit__(self, *_args): self.close()
+
+        def scandir(path):
+            return CountingScandir(original_scandir(path))
+
+        with patch("obsidian_kb.vault_io.os.scandir", scandir):
+            with TrustedVault(self.vault) as vault:
+                with self.assertRaises(Exception) as caught:
+                    vault.inventory(1)
+        self.assertEqual(type(caught.exception).__name__, "VaultInventoryOverflow")
+        self.assertEqual(consumed, 2)
 
     def test_privacy_controls_credentials_prefix_and_bounds(self):
         (self.vault / "Allowed").mkdir()

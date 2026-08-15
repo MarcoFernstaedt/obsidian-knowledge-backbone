@@ -29,6 +29,11 @@ ASSIGNMENT = re.compile(
     rf"(?im)(?:^[ \t]*(?:-[ \t]+)?|[,{{][ \t]*)"
     rf"(?:export[ \t]+)?[\"']?{CREDENTIAL_NAME}[\"']?[ \t]*[:=][ \t]*"
     r"(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,#}]+)")
+YAML_ASSIGNMENT = re.compile(
+    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?"
+    r"(?P<key>\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[A-Za-z0-9_-]+)"
+    r"[ \t]*:[ \t]*(?P<value>.*)$")
+BLOCK_SCALAR = re.compile(r"^[|>](?:(?:[1-9][+-]?)|(?:[+-][1-9]?)?)?(?:[ \t]+#.*)?$")
 PLACEHOLDER = re.compile(
     r"^(?:<[^>]+>|\$\{?[A-Z_][A-Z0-9_]*\}?|\$[A-Z_][A-Z0-9_]*|%[A-Z_][A-Z0-9_]*%|"
     r"your[_ -]?(?:api[_ -]?key|key|token|password|secret)(?:[_ -]here)?|"
@@ -39,8 +44,61 @@ DATABASE_URL = re.compile(
     r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis)://[^\s/:@]+:(?P<password>[^\s/@]+)@[^\s]+")
 
 
+def _yaml_scalar(value: str) -> str | None:
+    """Decode only scalar forms we can classify confidently; unknown means secret."""
+    value = value.strip()
+    if not value or value.startswith("#"):
+        return ""
+    if value.startswith("'"):
+        if len(value) < 2 or not value.endswith("'"):
+            return None
+        return value[1:-1].replace("''", "'")
+    if value.startswith('"'):
+        if len(value) < 2 or not value.endswith('"'):
+            return None
+        try:
+            import json
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return decoded if isinstance(decoded, str) else None
+    return value.split(" #", 1)[0].strip().rstrip(",;")
+
+
+def _contains_yaml_credential(text: str) -> bool:
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = YAML_ASSIGNMENT.match(line)
+        if not match:
+            continue
+        key = _yaml_scalar(match.group("key"))
+        if key is None or not re.fullmatch(CREDENTIAL_NAME, key, re.I):
+            continue
+        raw_value = match.group("value").strip()
+        if BLOCK_SCALAR.fullmatch(raw_value):
+            base_indent = len(match.group("indent").expandtabs(8))
+            content: list[str] = []
+            for following in lines[index + 1:]:
+                if not following.strip():
+                    continue
+                indent = len(following) - len(following.lstrip(" \t"))
+                if indent <= base_indent:
+                    break
+                content.append(following.strip())
+            if not content or any(not PLACEHOLDER.fullmatch(item) for item in content):
+                return True
+            continue
+        scalar = _yaml_scalar(raw_value)
+        if scalar and not PLACEHOLDER.fullmatch(scalar):
+            return True
+        if scalar is None:
+            return True
+    return False
+
+
 def contains_secret(text: str, extra_patterns: Iterable[str] = ()) -> bool:
-    if PRIVATE_KEY.search(text) or PROVIDER_TOKEN.search(text) or BEARER_JWT.search(text):
+    if (_contains_yaml_credential(text) or PRIVATE_KEY.search(text) or
+            PROVIDER_TOKEN.search(text) or BEARER_JWT.search(text)):
         return True
     for match in DATABASE_URL.finditer(text):
         if not PLACEHOLDER.fullmatch(match.group("password")):

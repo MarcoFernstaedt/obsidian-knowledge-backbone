@@ -192,12 +192,13 @@ class TrustedVault:
             os.close(fd)
 
     def inventory(self, maximum_entries: int) -> tuple[InventoryEntry, ...]:
-        """Recursively enumerate every path and metadata through held descriptors."""
+        """Lazily enumerate within a global bound, then sort only bounded entries."""
         if self.fd is None:
             raise OSError("vault is not open")
         if maximum_entries < 1:
             raise VaultInventoryOverflow("vault inventory limit exceeded")
         output = [InventoryEntry.from_stat("", os.fstat(self.fd))]
+        enumerated = 0
 
         def append(entry: InventoryEntry) -> None:
             output.append(entry)
@@ -205,17 +206,23 @@ class TrustedVault:
                 raise VaultInventoryOverflow("vault inventory limit exceeded")
 
         def walk(directory_fd: int, prefix: tuple[str, ...]) -> None:
-            entries = sorted(os.scandir(directory_fd), key=lambda item: item.name)
-            for entry in entries:
-                rel_parts = prefix + (entry.name,)
+            nonlocal enumerated
+            bounded: list[tuple[str, os.stat_result]] = []
+            with os.scandir(directory_fd) as entries:
+                for entry in entries:
+                    enumerated += 1
+                    if enumerated > maximum_entries:
+                        raise VaultInventoryOverflow("vault inventory limit exceeded")
+                    bounded.append((entry.name, entry.stat(follow_symlinks=False)))
+            for name, info in sorted(bounded, key=lambda item: item[0]):
+                rel_parts = prefix + (name,)
                 relative = PurePosixPath(*rel_parts).as_posix()
-                info = entry.stat(follow_symlinks=False)
                 item = InventoryEntry.from_stat(relative, info)
                 append(item)
                 if item.kind != "directory":
                     continue
                 try:
-                    child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                     dir_fd=directory_fd)
                 except OSError as exc:
                     if exc.errno in {errno.ELOOP, errno.ENOTDIR}:

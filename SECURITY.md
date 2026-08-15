@@ -10,7 +10,9 @@ The vault is read-only. Configuration binds the approved root device/inode. A co
 
 Eligible exact chunks are inserted only into a process-private SQLite FTS5 database opened as `:memory:`. The connection is closed before results return. Runtime retrieval creates no filesystem artifact and opens no network connection.
 
-Hidden/configured paths, false or malformed/nested retrieval controls, private keys, known token formats, and high-confidence credential assignments (including YAML list mappings) are suppressed. This is defense in depth, not a replacement for vault curation. Unknown/transient read failures and file/chunk/byte overflow abort the complete operation; an oversized eligible regular note is never reported as a safe exclusion, and no partial result is returned.
+Hidden/configured paths, false or malformed/nested retrieval controls, private keys, known token formats, and sensitive assignments (including YAML list mappings, quoted scalars, YAML single-quote escaping, and block scalars) are suppressed unless confidently classified as documentation placeholders. This is defense in depth, not a replacement for vault curation. Unknown/transient read failures and file/chunk/byte overflow abort the complete operation; an oversized eligible regular note is never reported as a safe exclusion, and no partial result is returned.
+
+Successful results are complete and internally consistent for the scan, not perpetually current. The mutable vault may change after the final check; status and search therefore report point-in-time freshness and always set `current=false`.
 
 Hermes errors disclose exception class rather than private paths or content. Status is path-free. Search passages are untrusted quoted source data, and human rendering escapes Unicode display controls and separators.
 

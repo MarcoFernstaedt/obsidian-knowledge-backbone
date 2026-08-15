@@ -1,6 +1,6 @@
 # Obsidian Knowledge Backbone
 
-Private, network-free citation search for curated Markdown vaults. Every operation scans the approved vault through descriptor-safe read-only access, applies the complete eligibility policy, chunks the exact current source, builds SQLite FTS5 strictly at `:memory:`, queries it, and closes it. Nothing is cached or written.
+Private, network-free citation search for curated Markdown vaults. Every operation scans the approved vault through descriptor-safe read-only access, applies the complete eligibility policy, creates an internally consistent point-in-time corpus, builds SQLite FTS5 strictly at `:memory:`, queries it, and closes it. Nothing is cached or written.
 
 ## Architecture
 
@@ -9,13 +9,13 @@ read-only vault -> privacy/eligibility gate -> exact bounded chunks
                 -> process-private SQLite :memory: FTS5 -> cited results -> close
 ```
 
-Only exact current source participates in retrieval. Search cannot be stale because descriptor-bound inventories bracket the scan, included and excluded source metadata is revalidated, and every eligible note is re-read and SHA-256 checked at the final boundary before the in-memory query runs. Any unknown read, concurrent source drift, or configured resource overflow fails closed without a partial corpus.
+Citations derive from one complete internally consistent scan: descriptor-bound inventories bracket the scan and every regular Markdown source whose bytes affect eligibility or content is re-read and SHA-256 checked. Any observed read failure, concurrent source drift, or configured resource overflow fails closed without a partial corpus. Because the vault is mutable, it can change after the final check; responses therefore report `snapshot_consistent=true`, `current=false`, and `freshness=point-in-time`, never perpetual currency.
 
 ## Privacy and correctness
 
 - `TrustedVault` binds the approved root device/inode at configuration load, reopens it from `/` through descriptor-relative `O_DIRECTORY|O_NOFOLLOW` traversal, and rejects every symlink/non-directory ancestor or identity change. Descendant enumeration and reads remain descriptor-relative and no-follow.
 - Hidden paths, configured folders/globs, symlinks/non-regular entries, UTF-8 BOM or quoted false frontmatter controls, malformed/nested retrieval controls, and credential-bearing notes are excluded. Oversized eligible regular notes are fatal resource overflow, not exclusions.
-- Limits bound files, chunks, total bytes, note bytes, query length, result count, and path prefixes. Overflow reports incomplete/failure, never current.
+- Limits bound lazy inventory enumeration before materialization, chunks, total bytes, note bytes, query length, result count, and path prefixes. Overflow reports incomplete/failure, never current.
 - FTS5 uses `unicode61 remove_diacritics 2`, exact non-stemming query tokens, a fixed documented English stop-word set, and BM25 weights of title `8`, heading `5`, path `3`, content `1`. Terms are OR-combined without prefix, fuzzy, or hidden expansion. Ties use path then FTS row order.
 - Citations, headings, snippets, paths, and line spans come directly from the same exact chunks inserted into the private in-memory database.
 - Returned passages are labeled untrusted quoted source data. Human output visibly escapes control, format, line-separator, and paragraph-separator characters.
@@ -42,7 +42,7 @@ imperator-knowledge audit --json
 imperator-knowledge index --json
 ```
 
-`index` and compatibility entry point `imperator-vault-index` now mean read-only live audit. They explicitly report `ephemeral=true`, `persistence=false`, and `compatibility=ephemeral-live`; `--dry-run` remains accepted because every audit is inherently dry. `status` performs a complete live scan and returns eligible/excluded note counts, chunk count, scan duration, inventory completeness/current, and compatibility—never note paths or content.
+`index` and compatibility entry point `imperator-vault-index` now mean read-only live audit. They explicitly report `ephemeral=true`, `persistence=false`, and `compatibility=ephemeral-live`; `--dry-run` remains accepted because every audit is inherently dry. `status` performs a complete point-in-time scan and returns eligible/excluded note counts, chunk count, scan duration, source-inventory completeness, snapshot consistency, `current=false`, freshness, and compatibility—never note paths or content.
 
 All commands use only `OBSIDIAN_KB_CONFIG`; callers cannot override it. Queries are 1–512 characters, limits are 1–20, and path prefixes are relative traversal-safe POSIX vault paths. Config/usage errors exit `2`; scan/invariant failures exit `1`.
 

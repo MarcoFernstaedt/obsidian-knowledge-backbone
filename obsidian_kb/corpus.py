@@ -43,7 +43,9 @@ class LiveCorpus:
             "chunks": len(self.chunks),
             "scan_duration_ms": self.scan_duration_ms,
             "source_inventory_complete": True,
-            "current": True,
+            "snapshot_consistent": True,
+            "current": False,
+            "freshness": "point-in-time",
             "compatibility": "ephemeral-live",
         }
 
@@ -78,7 +80,7 @@ def scan(settings: Settings) -> LiveCorpus:
     started = time.perf_counter_ns()
     chunks: list[dict] = []
     eligible = excluded = total_bytes = 0
-    eligible_sources: dict[str, tuple[InventoryEntry, str]] = {}
+    read_sources: dict[str, tuple[InventoryEntry, str]] = {}
     try:
         identity = (settings.vault_device, settings.vault_inode)
         with TrustedVault(settings.vault, identity) as vault:
@@ -111,6 +113,7 @@ def scan(settings: Settings) -> LiveCorpus:
                 total_bytes += len(raw)
                 if total_bytes > settings.maximum_total_bytes:
                     raise CorpusLimitError("maximum_total_bytes exceeded; source inventory is incomplete")
+                read_sources[path] = (source, source_sha(raw))
                 try:
                     text = raw.decode("utf-8")
                 except UnicodeError:
@@ -131,7 +134,6 @@ def scan(settings: Settings) -> LiveCorpus:
                     raise CorpusLimitError("maximum_chunks exceeded; source inventory is incomplete")
                 chunks.extend(note_chunks)
                 eligible += 1
-                eligible_sources[path] = (source, source_sha(raw))
 
             try:
                 after_scan = vault.inventory(settings.maximum_files)
@@ -140,9 +142,10 @@ def scan(settings: Settings) -> LiveCorpus:
             if before != after_scan:
                 raise CorpusScanError("vault inventory changed; no partial corpus returned")
 
-            # Re-read every included source at the final boundary. Metadata alone is
+            # Re-read every regular Markdown source whose bytes were consulted,
+            # including content exclusions and invalid UTF-8. Metadata alone is
             # insufficient when an attacker can preserve size and timestamps.
-            for path, (source, expected_sha) in eligible_sources.items():
+            for path, (source, expected_sha) in read_sources.items():
                 try:
                     current, opened = vault.read(path, settings.maximum_note_bytes)
                 except (VaultPolicyError, VaultOversizeError, OSError) as exc:
@@ -248,7 +251,9 @@ def audit(settings: Settings) -> dict:
             "chunks": 0,
             "scan_duration_ms": 0,
             "source_inventory_complete": False,
+            "snapshot_consistent": False,
             "current": False,
+            "freshness": "unavailable",
             "compatibility": "ephemeral-live",
             "error_class": type(exc).__name__,
         }

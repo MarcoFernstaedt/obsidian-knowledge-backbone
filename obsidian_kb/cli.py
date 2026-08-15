@@ -1,4 +1,4 @@
-"""Read-only CLI for ephemeral live audit, search, and status."""
+"""Read-only CLI for ephemeral point-in-time audit, search, and status."""
 from __future__ import annotations
 
 import argparse
@@ -68,10 +68,10 @@ def build_parser():
     _json(index)
     index.add_argument("--dry-run", action="store_true", help="accepted compatibility flag; audit is always read-only")
     index.set_defaults(handler=cmd_audit)
-    audit_parser = sub.add_parser("audit", help="validate live eligibility/chunking and in-memory FTS")
+    audit_parser = sub.add_parser("audit", help="validate point-in-time eligibility/chunking and in-memory FTS")
     _json(audit_parser)
     audit_parser.set_defaults(handler=cmd_audit)
-    status = sub.add_parser("status", help="scan and report path-free live corpus counts")
+    status = sub.add_parser("status", help="scan and report path-free point-in-time corpus counts")
     _json(status)
     status.set_defaults(handler=cmd_status)
     for name in ("search", "query"):

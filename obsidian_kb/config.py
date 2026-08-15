@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import stat
 import tomllib
 import unicodedata
@@ -24,12 +25,11 @@ def normalize_control_key(value: str) -> str:
 
 def _control_keys(values: tuple[str, ...]) -> tuple[str, ...]:
     normalized: list[str] = []
-    forbidden = set(":#[]{}&,*!?|>'\"%@`")
     for value in values:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", value):
+            raise ConfigError("frontmatter control keys must be safe ASCII identifiers")
         key = normalize_control_key(value)
-        if (not key or key == "imperator_retrieval" or key.startswith("-")
-                or any(char.isspace() or unicodedata.category(char)[0] in {"C", "Z"}
-                       or char in forbidden for char in key)):
+        if key == "imperator_retrieval":
             raise ConfigError("frontmatter control keys contain an unsafe or reserved name")
         if key in normalized:
             raise ConfigError("frontmatter control keys are ambiguous after Unicode normalization")
@@ -124,20 +124,37 @@ def validate_relative_prefix(value: str | None) -> str | None:
 
 
 def _load_toml(path: Path, require_private: bool) -> dict:
+    fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_size", "st_mtime_ns", "st_ctime_ns")
+
+    def snapshot(info: os.stat_result) -> tuple[int, ...]:
+        return tuple(getattr(info, field) for field in fields)
+
     try:
         info = path.lstat()
-        if require_private and (not stat.S_ISREG(info.st_mode) or path.is_symlink() or
-                                info.st_uid != os.getuid() or info.st_mode & 0o077):
+        if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or
+                (require_private and (info.st_uid != os.getuid() or info.st_mode & 0o077))):
             raise ConfigError("config must be a current-user-owned regular non-symlink file with mode 0600")
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
-            opened = os.fstat(fd)
-            if not stat.S_ISREG(opened.st_mode) or (require_private and
-                    (opened.st_uid != os.getuid() or opened.st_mode & 0o077 or
-                     (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino))):
+            opened_before = os.fstat(fd)
+            if (not stat.S_ISREG(opened_before.st_mode) or
+                    (opened_before.st_dev, opened_before.st_ino, opened_before.st_mode) !=
+                    (info.st_dev, info.st_ino, info.st_mode) or
+                    (require_private and
+                     (opened_before.st_uid != os.getuid() or opened_before.st_mode & 0o077))):
                 raise ConfigError("config security invariant failed")
             with os.fdopen(fd, "rb", closefd=False) as handle:
                 loaded = tomllib.load(handle)
+            opened_after = os.fstat(fd)
+            path_after = path.lstat()
+            if (snapshot(opened_before) != snapshot(opened_after) or
+                    (path_after.st_dev, path_after.st_ino, path_after.st_mode) !=
+                    (opened_after.st_dev, opened_after.st_ino, opened_after.st_mode) or
+                    not stat.S_ISREG(path_after.st_mode) or
+                    (require_private and
+                     (opened_after.st_uid != os.getuid() or opened_after.st_mode & 0o077 or
+                      path_after.st_uid != os.getuid() or path_after.st_mode & 0o077))):
+                raise ConfigError("config changed during parse")
         finally:
             os.close(fd)
     except ConfigError:
