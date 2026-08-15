@@ -1,0 +1,23 @@
+name: obsidian-knowledge-backbone
+version: 0.1.0
+description: Hermes plugin for read-only Obsidian vault citation search.
+author: "Marco Fernstaedt"
+tags:
+  - hermes
+  - plugin
+  - obsidian
+  - privacy
+  - search
+python:
+  module: "hermes_plugin"
+  functions:
+    - obsidian_knowledge_search
+commands:
+  - trigger: "/knowledge"
+    entrypoint: "hermes_plugin._knowledge_command"
+    description: "Search curated Obsidian vault; returns citations only."
+    arg_schema:
+      query: {type: string, required: true}
+      k: {type: integer, default: 5}
+      json: {type: boolean, default: false}
+hidden: false

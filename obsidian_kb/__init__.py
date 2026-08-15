@@ -1,0 +1,1 @@
+"""obsidian_kb: Knowledge backbone engine package."""
