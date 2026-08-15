@@ -37,7 +37,7 @@ Screen-reader equivalent: the read-only vault passes through exclusion and crede
 ## Privacy and correctness model
 
 - The vault is opened only for reading. State is written only to the configured SQLite path and optional Qdrant collection.
-- Hidden paths, configured folders and globs, frontmatter false values, private keys, known token shapes, and high-confidence credential assignments are excluded.
+- Hidden paths (enabled by default), configured folders and globs, frontmatter false values, private keys, known token shapes, and high-confidence credential assignments are excluded.
 - Excluded-note records contain only path and reason. They contain no source hash, excerpt, or content.
 - SQLite is authoritative. Qdrant payloads contain only `chunk_id`; stale remote points cannot authorize a result.
 - Every candidate is checked against the current note SHA-256. Changed or missing source suppresses results until reindexing.
@@ -76,7 +76,7 @@ knowledge_index: false
 ---
 ```
 
-Folder and glob rules use vault-relative POSIX paths. Hidden path components are always excluded. Placeholder documentation such as `api_key = ${API_KEY}` remains indexable; real credential assignments suppress the complete note. Use custom regular expressions sparingly because matches fail closed.
+Folder and glob rules use vault-relative POSIX paths. Hidden path components are excluded when `exclusions.hidden` is true; this secure default should be disabled only for intentionally curated hidden notes. Placeholder documentation such as `api_key = ${API_KEY}` remains indexable; real credential assignments suppress the complete note. Use custom regular expressions sparingly because matches fail closed.
 
 ## Hermes plugin
 

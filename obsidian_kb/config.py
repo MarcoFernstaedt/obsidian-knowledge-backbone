@@ -16,6 +16,7 @@ class Settings:
     state: Path
     excluded_folders: tuple[str, ...] = (".git", ".obsidian", ".trash", "Templates")
     excluded_globs: tuple[str, ...] = ()
+    exclude_hidden: bool = True
     frontmatter_false_keys: tuple[str, ...] = ("index", "semantic_index", "knowledge_index")
     extra_secret_patterns: tuple[str, ...] = ()
     max_lines: int = 60
@@ -78,6 +79,9 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     globs = _strings(exclusions.get("globs"), "exclusions.globs")
     keys = _strings(exclusions.get("frontmatter_false_keys"), "exclusions.frontmatter_false_keys") or Settings.frontmatter_false_keys
     patterns = _strings(exclusions.get("secret_patterns"), "exclusions.secret_patterns")
+    exclude_hidden = exclusions.get("hidden", True)
+    if not isinstance(exclude_hidden, bool):
+        raise ConfigError("exclusions.hidden must be a boolean")
     max_lines = chunking.get("max_lines", 60)
     max_chars = chunking.get("max_chars", 6000)
     vector_size = semantic.get("vector_size", 768)
@@ -89,7 +93,7 @@ def load_settings(config_path: str | Path | None = None, *, vault: str | Path | 
     for key in ("ollama_url", "ollama_model", "qdrant_url", "collection"):
         if key in semantic and semantic[key] is not None and not isinstance(semantic[key], str):
             raise ConfigError(f"semantic.{key} must be a string")
-    return Settings(vault_path.resolve(), state_path.resolve(), folders, globs, keys, patterns,
+    return Settings(vault_path.resolve(), state_path.resolve(), folders, globs, exclude_hidden, keys, patterns,
                     max_lines, max_chars, semantic.get("ollama_url"), semantic.get("ollama_model", "nomic-embed-text"),
                     semantic.get("qdrant_url"), semantic.get("collection", "obsidian_knowledge"),
                     vector_size, float(timeout))

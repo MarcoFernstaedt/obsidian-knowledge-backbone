@@ -12,15 +12,20 @@ from .remote import OllamaClient, QdrantClient, RemoteError
 from .store import Store
 
 
-def source_sha(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def source_sha(source: str | bytes) -> str:
+    raw = source if isinstance(source, bytes) else source.encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
-def exclusion_reason(path: str, text: str, settings: Settings) -> str | None:
+def path_exclusion_reason(path: str, settings: Settings) -> str | None:
     parts = Path(path).parts
-    if any(part.startswith(".") for part in parts): return "hidden-path"
+    if settings.exclude_hidden and any(part.startswith(".") for part in parts): return "hidden-path"
     if any(part in settings.excluded_folders for part in parts[:-1]): return "excluded-folder"
     if any(fnmatch(path, pattern) for pattern in settings.excluded_globs): return "excluded-glob"
+    return None
+
+
+def content_exclusion_reason(text: str, settings: Settings) -> str | None:
     if is_frontmatter_excluded(text, settings.frontmatter_false_keys): return "frontmatter-false"
     if contains_secret(text, settings.extra_secret_patterns): return "credential-content"
     return None
@@ -48,14 +53,7 @@ class Indexer:
         for file in sorted(self.settings.vault.rglob("*.md")):
             path = file.relative_to(self.settings.vault).as_posix()
             seen.add(path)
-            try: text = file.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
-                reason = "unreadable"
-                old = self.store.point_ids(path)
-                self._delete_remote(old, warnings)
-                self.store.exclude(path, reason); excluded += 1
-                continue
-            reason = exclusion_reason(path, text, self.settings)
+            reason = path_exclusion_reason(path, self.settings)
             if reason:
                 row = self.store.note(path)
                 if not row or row["status"] != "excluded" or row["exclusion_reason"] != reason:
@@ -63,7 +61,24 @@ class Indexer:
                     self.store.exclude(path, reason); excluded += 1
                 else: unchanged += 1
                 continue
-            digest = source_sha(text)
+            try:
+                raw = file.read_bytes()
+                text = raw.decode("utf-8")
+            except (OSError, UnicodeError):
+                reason = "unreadable"
+                old = self.store.point_ids(path)
+                self._delete_remote(old, warnings)
+                self.store.exclude(path, reason); excluded += 1
+                continue
+            reason = content_exclusion_reason(text, self.settings)
+            if reason:
+                row = self.store.note(path)
+                if not row or row["status"] != "excluded" or row["exclusion_reason"] != reason:
+                    self._delete_remote(self.store.point_ids(path), warnings)
+                    self.store.exclude(path, reason); excluded += 1
+                else: unchanged += 1
+                continue
+            digest = source_sha(raw)
             row = self.store.note(path)
             if row and row["status"] == "active" and row["source_sha256"] == digest:
                 unchanged += 1; continue

@@ -31,7 +31,7 @@ def reciprocal_rank_fusion(lexical: list[dict], semantic: list[dict], limit: int
 
 
 def _fresh(row: dict, vault: Path) -> bool:
-    try: text = (vault / row["note_path"]).read_text(encoding="utf-8")
+    try: text = (vault / row["note_path"]).read_bytes()
     except (OSError, UnicodeError): return False
     return source_sha(text) == row["source_sha256"]
 

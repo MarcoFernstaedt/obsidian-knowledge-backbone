@@ -7,7 +7,7 @@ from collections.abc import Iterable
 PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.I)
 ASSIGNMENT = re.compile(
     r"(?im)^\s*(?:export\s+)?(?:api[_-]?key|secret(?:[_-]?(?:key|token))?|password|passwd|token|"
-    r"aws_access_key_id|aws_secret_access_key|client_secret)\s*[:=]\s*([^\s#]+|['\"][^'\"]+['\"])")
+    r"aws_access_key_id|aws_secret_access_key|client_secret)\s*[:=]\s*(['\"][^'\"]+['\"]|[^\s#]+)")
 KNOWN_TOKEN = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{24,}|AKIA[0-9A-Z]{16})\b")
 PLACEHOLDER = re.compile(
     r"^(?:<[^>]+>|\$\{?\w+\}?|%\w+%|your[_ -]?(?:key|token|password|secret)(?:[_ -]here)?|"

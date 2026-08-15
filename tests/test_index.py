@@ -68,6 +68,19 @@ class IndexSearchTests(unittest.TestCase):
         result = search(self.settings, "needle", offline=True)
         self.assertEqual(result["results"], [])
 
+    def test_source_hash_uses_exact_bytes(self):
+        note = self.vault / "a.md"; note.write_bytes(b"# Alpha\r\nunique needle\r\n")
+        self.run_index(); note.write_bytes(b"# Alpha\nunique needle\n")
+        self.assertEqual(search(self.settings, "needle", offline=True)["results"], [])
+
+    def test_hidden_exclusion_is_configurable(self):
+        (self.vault / ".visible.md").write_text("# Alpha\nunique needle")
+        settings = Settings(self.vault, self.state, exclude_hidden=False)
+        indexer = Indexer(settings)
+        try: indexer.run()
+        finally: indexer.close()
+        self.assertEqual(search(settings, "needle", offline=True)["results"][0]["path"], ".visible.md")
+
     def test_semantic_postfilter_rejects_stale_remote_point(self):
         note = self.vault / "a.md"; note.write_text("# Alpha\nunique needle")
         remote = FakeQdrant(); self.run_index(ollama=FakeOllama(), qdrant=remote)

@@ -52,7 +52,7 @@ def _audit(settings):
     try:
         integrity = store.conn.execute("PRAGMA quick_check(1)").fetchone()[0]
         for row in store.conn.execute("SELECT path,source_sha256 FROM notes WHERE status='active'"):
-            try: current = source_sha((settings.vault / row["path"]).read_text(encoding="utf-8"))
+            try: current = source_sha((settings.vault / row["path"]).read_bytes())
             except (OSError, UnicodeError): current = None
             if current != row["source_sha256"]: stale.append(row["path"])
         return {"ok": integrity == "ok" and not stale, "integrity": integrity, "stale_paths": stale, **store.counts()}

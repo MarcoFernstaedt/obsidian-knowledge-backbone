@@ -5,6 +5,7 @@ path = "/path/to/your/Obsidian-vault"
 sqlite_path = "/path/to/operator-state/obsidian-kb.sqlite3"
 
 [exclusions]
+hidden = true
 folders = [".git", ".obsidian", ".trash", "Templates"]
 globs = ["Private/**", "**/*.private.md"]
 frontmatter_false_keys = ["index", "semantic_index", "knowledge_index"]
