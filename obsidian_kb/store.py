@@ -50,6 +50,12 @@ class Store:
     def point_ids(self, path: str) -> list[str]:
         return [row[0] for row in self.conn.execute("SELECT point_id FROM chunks WHERE note_path=?", (path,))]
 
+    def needs_semantic(self, path: str) -> bool:
+        total, ready = self.conn.execute(
+            "SELECT count(*), coalesce(sum(semantic_ready),0) FROM chunks WHERE note_path=?", (path,)
+        ).fetchone()
+        return total > 0 and ready < total
+
     def replace_note(self, path: str, source_sha: str, chunks: list[dict], semantic_ready: bool):
         with self.conn:
             old_ids = [row[0] for row in self.conn.execute("SELECT chunk_id FROM chunks WHERE note_path=?", (path,))]

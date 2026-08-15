@@ -81,7 +81,8 @@ class Indexer:
             digest = source_sha(raw)
             row = self.store.note(path)
             if row and row["status"] == "active" and row["source_sha256"] == digest:
-                unchanged += 1; continue
+                if not (self.ollama and self.qdrant and self.store.needs_semantic(path)):
+                    unchanged += 1; continue
             chunks = chunk_markdown(text, digest, path, max_lines=self.settings.max_lines, max_chars=self.settings.max_chars)
             old_points = self.store.point_ids(path)
             semantic_ready = False

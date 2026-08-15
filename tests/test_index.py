@@ -104,6 +104,14 @@ class IndexSearchTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["modes"], ["lexical"])
         self.assertTrue(result["degraded"])
 
+    def test_unchanged_note_recovers_semantic_projection(self):
+        (self.vault / "a.md").write_text("# Alpha\nunique needle")
+        self.run_index()
+        remote = FakeQdrant()
+        result = self.run_index(ollama=FakeOllama(), qdrant=remote)
+        self.assertEqual(result["semantic_ready"], 1)
+        self.assertEqual(len(remote.points), 1)
+
     def test_rrf_is_deterministic_with_ties(self):
         a = {"chunk_id": "a", "note_path": "b.md", "start_line": 1}
         b = {"chunk_id": "b", "note_path": "a.md", "start_line": 1}
